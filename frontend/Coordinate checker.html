@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Health Facility GPS Validation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Bootstrap -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="styles.css">
+  <!-- DataTables CSS + Extensions -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/searchpanes/2.2.0/css/searchPanes.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/select/1.7.0/css/select.dataTables.min.css" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0/css/select2.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+
+</head>
+
+<body>
+
+  <div class="dashboard-container">
+    <div class="text-center mb-4">
+      <h1>Health Facility GPS Validation</h1>
+    </div>
+
+    <div class="outer-container">
+      <div class="col1">
+        <div class="validation-section">
+          <h5>1. Upload Data</h5>
+          <label class="form-label">Select Country</label>
+          <select class="form-select" id="countrySelect">
+            <option value="">-- Select a country --</option>
+            <option value="MW">Malawi</option>
+            <option value="KE">Kenya</option>
+            <option value="TZ">Tanzania</option>
+            <option value="UG">Uganda</option>
+            <option value="ZM">Zambia</option>
+            <option value="ZW">Zimbabwe</option>
+            <option value="NG">Nigeria</option>
+          </select>
+
+          <label class="form-label mt-3">Upload CSV File</label>
+          <input type="file" class="form-control" id="fileUpload" accept=".csv">
+          <div class="form-text">CSV columns: Name, x, y, Admin1, Admin2, Admin3</div>
+
+          <button class="btn btn-primary mt-3" id="validateBtn" disabled>Validate Coordinates</button>
+          <div class="api-status mt-2" id="apiStatus"></div>
+
+          <!-- Overall Progress Bar -->
+          <div class="overall-progress" id="overallProgress" style="display:none;">
+            <div class="progress-summary">
+              <span id="progressText">Processing...</span>
+              <span id="progressPercent">0%</span>
+            </div>
+            <div class="progress">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="progressBar"
+                style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="validation-section">
+          <h5>2. Data Summary</h5>
+          <div id="dataSummary">
+            <p class="text-muted">No data uploaded yet</p>
+          </div>
+        </div>
+
+        <div class="validation-section">
+          <h5>3. Validation Summary</h5>
+          <div id="validationResults">
+            <p class="text-muted">Upload a file and click validate</p>
+          </div>
+        </div>
+
+        <!-- Real-time Progress Tracker -->
+        <div class="validation-section" id="progressSection" style="display:none;">
+          <h5>4. Real-Time Progress</h5>
+          <div class="progress-tracker" id="progressTracker"></div>
+        </div>
+      </div>
+
+      <div class="col2">
+        <div class="validation-section">
+          <h5>5. Detailed Results</h5>
+          <div class="table-container">
+            <table class="table table-striped table-hover" id="resultsTable" style="width:100%">
+              <thead>
+                <tr>
+                  <th>Facility</th>
+                  <th>Longitude (X)</th>
+                  <th>Latitude (Y)</th>
+                  <th>Admin1</th>
+                  <th>Admin2</th>
+                  <th>Admin3</th>
+                  <th>Country</th>
+                  <th>Admin Area</th>
+                  <th>Duplicates</th>
+                  <th>Road</th>
+                  <th>Water</th>
+                  <th>Building</th>
+                  <th>Population</th>
+                  <th>Overture</th>
+                  <th>Score</th>
+                </tr>
+              </thead>
+              <tbody id="resultsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="col3">
+        <div class="validation-section">
+          <h5>6. Map View</h5>
+          <div id="map" class="map-container"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0/js/select2.min.js"></script>
+
+  <!-- DataTables JS + Extensions -->
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+  <script src="https://cdn.datatables.net/searchpanes/2.2.0/js/dataTables.searchPanes.min.js"></script>
+  <script src="https://cdn.datatables.net/select/1.7.0/js/dataTables.select.min.js"></script>
+  <script src="https://cdn.datatables.net/jszip/3.10.1/jszip.min.js"></script>
+
+  <script>
+    $(document).ready(function () {
+      window.resultsTable = $('#resultsTable').DataTable({
+        searchPanes: { cascadePanes: true, viewTotal: true },
+        buttons: [
+          { extend: 'excelHtml5', text: 'Export to Excel', className: 'btn btn-success btn-sm' },
+          { extend: 'csvHtml5', text: 'Export CSV', className: 'btn btn-outline-primary btn-sm' }
+        ],
+        pageLength: 10,
+        responsive: true,
+        order: [],
+        scrollY: "400px",
+        scrollCollapse: true,
+        scrollX: true,
+        language: { search: "Search" }
+      });
+    });
+  </script>
+
+  <script>
+    // --- Base layers ---
+    const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    });
+
+    const satelliteLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Tiles © Esri', maxZoom: 20 }
+    );
+
+    const map = L.map('map', { center: [-13.2543, 34.3015], zoom: 6, layers: [streetLayer] });
+    const baseMaps = { "OSM": streetLayer, "Satellite": satelliteLayer };
+    L.control.layers(baseMaps).addTo(map);
+
+    let uploadedData = [];
+    let countryBoundaryLayer = null;
+    let markers = {};
+    let countryData = null;
+
+    const countryAlpha2Map = {
+      MW: 'mw',
+      KE: 'ke',
+      TZ: 'tz',
+      UG: 'ug',
+      ZM: 'zm',
+      ZW: 'zw',
+      NG: 'ng'
+    };
+    const API_CONFIG = {
+      worldpop: 'http://localhost:5000/api/worldpop',
+      nominatim: 'http://localhost:5000/api/nominatim',
+      overture: 'http://localhost:5000/api/overture_match',
+      road_distance: 'http://localhost:5000/api/road_distance',
+      building_distance: 'http://localhost:5000/api/building_distance',
+      water_check: 'http://localhost:5000/api/water_check'
+    };
+
+    document.getElementById('fileUpload').addEventListener('change', handleFileUpload);
+    document.getElementById('countrySelect').addEventListener('change', () => {
+      const country = document.getElementById('countrySelect').value;
+      if (country) loadCountryBoundary(country);
+      updateValidateButton();
+    });
+    document.getElementById('validateBtn').addEventListener('click', validateCoordinates);
+
+    function handleFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      Papa.parse(file, {
+        header: true,
+        complete: function (results) {
+          uploadedData = results.data.filter(r => r.Name && r.x && r.y);
+          updateValidateButton();
+          updateDataSummary();
+        }
+      });
+    }
+
+    function updateValidateButton() {
+      const country = document.getElementById('countrySelect').value;
+      document.getElementById('validateBtn').disabled = !(country && uploadedData.length > 0);
+    }
+
+    function updateDataSummary() {
+      const summaryDiv = document.getElementById('dataSummary');
+      if (uploadedData.length === 0) {
+        summaryDiv.innerHTML = '<p class="text-muted">No data uploaded yet</p>';
+        return;
+      }
+      summaryDiv.innerHTML = `
+        <p><strong>Facilities:</strong> ${uploadedData.length}</p>
+        <p><strong>X range:</strong> ${Math.min(...uploadedData.map(d => parseFloat(d.x))).toFixed(4)} - ${Math.max(...uploadedData.map(d => parseFloat(d.x))).toFixed(4)}</p>
+        <p><strong>Y range:</strong> ${Math.min(...uploadedData.map(d => parseFloat(d.y))).toFixed(4)} - ${Math.max(...uploadedData.map(d => parseFloat(d.y))).toFixed(4)}</p>
+      `;
+    }
+
+    async function loadCountryBoundary(countryCode) {
+      updateApiStatus('Loading country boundary...');
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?country=${countryCode}&polygon_geojson=1&format=json`);
+        const data = await res.json();
+        if (data && data[0] && data[0].geojson) {
+          if (countryBoundaryLayer) map.removeLayer(countryBoundaryLayer);
+          countryBoundaryLayer = L.geoJSON(data[0].geojson, {
+            style: { color: 'blue', weight: 2, fillOpacity: 0.1 }
+          }).addTo(map);
+          map.fitBounds(countryBoundaryLayer.getBounds());
+          updateApiStatus('Country boundary loaded');
+        }
+      } catch (e) {
+        console.error(e);
+        updateApiStatus('Could not load country boundary');
+      }
+    }
+
+    function normalize(str) {
+      return str ? str.toLowerCase().replace(/\s+/g, '').trim() : '';
+    }
+
+    // Progress tracking UI functions
+    function createProgressCard(facility, index) {
+      const card = document.createElement('div');
+      card.className = 'facility-progress';
+      card.id = `progress-${index}`;
+      card.innerHTML = `
+        <div class="facility-header">
+          <span class="facility-name">${facility.Name}</span>
+          <span class="facility-status status-processing" id="status-${index}">Processing...</span>
+        </div>
+        <div class="api-checks">
+          <div class="api-check check-pending" id="check-country-${index}">
+            <span>Country</span>
+            <span>⏳</span>
+          </div>
+          <div class="api-check check-pending" id="check-admin-${index}">
+            <span>Admin</span>
+            <span>⏳</span>
+          </div>
+          <div class="api-check check-pending" id="check-road-${index}">
+            <span>Road</span>
+            <span>⏳</span>
+          </div>
+          <div class="api-check check-pending" id="check-building-${index}">
+            <span>Building</span>
+            <span>⏳</span>
+          </div>
+          <div class="api-check check-pending" id="check-water-${index}">
+            <span>Water</span>
+            <span>⏳</span>
+          </div>
+          <div class="api-check check-pending" id="check-population-${index}">
+            <span>Population</span>
+            <span>⏳</span>
+          </div>
+          <div class="api-check check-pending" id="check-overture-${index}">
+            <span>Overture</span>
+            <span>⏳</span>
+          </div>
+        </div>
+      `;
+      return card;
+    }
+
+    function updateCheckStatus(index, checkName, status) {
+      const checkEl = document.getElementById(`check-${checkName}-${index}`);
+      if (!checkEl) return;
+
+      checkEl.className = `api-check check-${status}`;
+      const icon = status === 'loading' ? '<span class="spinner-icon"></span>' :
+        status === 'success' ? '✓' :
+          status === 'failed' ? '✗' : '⏳';
+      checkEl.querySelector('span:last-child').innerHTML = icon;
+    }
+
+    function updateFacilityStatus(index, status, message = '') {
+      const statusEl = document.getElementById(`status-${index}`);
+      if (!statusEl) return;
+
+      statusEl.className = `facility-status status-${status}`;
+      statusEl.textContent = message || (status === 'complete' ? 'Complete' :
+        status === 'error' ? 'Error' : 'Processing...');
+    }
+
+    function updateOverallProgress(current, total) {
+      const percent = Math.round((current / total) * 100);
+      document.getElementById('progressText').textContent = `${current} / ${total} facilities`;
+      document.getElementById('progressPercent').textContent = `${percent}%`;
+      document.getElementById('progressBar').style.width = `${percent}%`;
+    }
+    function isSimilar(a, b) {
+      if (!a || !b) return false;
+      a = a.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim(); // remove accents
+      b = b.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      return a === b || a.startsWith(b) || b.startsWith(a);
+    }
+
+    // --- Core validation with progress tracking ---
+    async function validateCoordinates() {
+      const country = document.getElementById('countrySelect').value;
+      const results = [];
+      const batchSize = 10; // Process 10 facilities at once
+
+      // Show progress section
+      document.getElementById('progressSection').style.display = 'block';
+      document.getElementById('overallProgress').style.display = 'block';
+      const tracker = document.getElementById('progressTracker');
+      tracker.innerHTML = '';
+
+      // Create progress cards for all facilities
+      uploadedData.forEach((f, i) => {
+        tracker.appendChild(createProgressCard(f, i));
+      });
+
+      async function validateSingleFacility(f, index, total) {
+        const x = parseFloat(f.x), y = parseFloat(f.y);
+        updateApiStatus(`Validating facility ${index + 1}/${total}: ${f.Name}`);
+
+        // Country check
+        updateCheckStatus(index, 'country', 'loading');
+        try {
+          const countryResp = await fetch(`${API_CONFIG.nominatim}?lat=${y}&lon=${x}&format=json&addressdetails=1`);
+          countryData = await countryResp.json();
+          const expectedCountry = countryAlpha2Map[country];
+          f.countryBoundary = {
+            valid: countryData.address?.country_code === expectedCountry,
+            message: countryData.address?.country || 'Unknown'
+          };
+          updateCheckStatus(index, 'country', f.countryBoundary.valid ? 'success' : 'failed');
+        } catch (e) {
+          f.countryBoundary = { valid: false, message: 'Country check failed' };
+          updateCheckStatus(index, 'country', 'failed');
+        }
+
+        // --- Admin1 check ---
+        updateCheckStatus(index, 'admin', 'loading');
+
+        try {
+          const osmAdmin1 = normalize(countryData.address?.state || '');
+          console.log("Admin 1", f.Admin1)
+          console.log("Server admin 1", countryData?.address?.state)
+
+          const admin1 = normalize(f.Admin1);
+
+          const admin1Match = isSimilar(admin1, osmAdmin1);
+
+          const score = admin1Match ? 100 : 0; // 100 if matches, 0 if not
+          const msg = admin1Match ? "Admin1 matches" : "Admin1 mismatch";
+
+          f.adminAreaMatch = {
+            valid: admin1Match,
+            score,
+            message: msg
+          };
+
+          updateCheckStatus(index, 'admin', admin1Match ? 'success' : 'failed');
+
+        } catch (e) {
+          console.error('Admin1 check failed', e);
+          f.adminAreaMatch = { valid: false, score: 0, message: 'Admin1 check failed' };
+          updateCheckStatus(index, 'admin', 'failed');
+        }
+
+
+        // Duplicate check (instant, no API)
+        const threshold = 0.001;
+        const duplicates = uploadedData.filter(o =>
+          o !== f &&
+          Math.abs(parseFloat(o.x) - x) < threshold &&
+          Math.abs(parseFloat(o.y) - y) < threshold
+        );
+        f.duplicateCheck = {
+          valid: duplicates.length === 0,
+          message: duplicates.length === 0 ? 'No duplicates' : `${duplicates.length} duplicates`
+        };
+
+        // Road distance
+        updateCheckStatus(index, 'road', 'loading');
+        try {
+          const roadResp = await fetch(`${API_CONFIG.road_distance}?lat=${y}&lon=${x}`);
+          const roadData = await roadResp.json();
+          f.roadDistance = roadData.valid
+            ? { valid: true, distance: roadData.distance, message: roadData.message }
+            : { valid: false, distance: null, message: roadData.message || 'No road nearby' };
+          updateCheckStatus(index, 'road', roadData.valid ? 'success' : 'failed');
+        } catch (e) {
+          f.roadDistance = { valid: false, distance: null, message: 'Road distance failed' };
+          updateCheckStatus(index, 'road', 'failed');
+        }
+
+        // Building distance
+        updateCheckStatus(index, 'building', 'loading');
+        try {
+          const buildResp = await fetch(`${API_CONFIG.building_distance}?lat=${y}&lon=${x}`);
+          const buildData = await buildResp.json();
+          f.buildingDistance = buildData.valid
+            ? { valid: true, distance: buildData.distance, message: buildData.message }
+            : { valid: false, distance: null, message: buildData.message || 'No building nearby' };
+          updateCheckStatus(index, 'building', buildData.valid ? 'success' : 'failed');
+        } catch (e) {
+          f.buildingDistance = { valid: false, distance: null, message: 'Building distance failed' };
+          updateCheckStatus(index, 'building', 'failed');
+        }
+
+        // Water check
+        updateCheckStatus(index, 'water', 'loading');
+        try {
+          const waterResp = await fetch(`${API_CONFIG.water_check}?lat=${y}&lon=${x}`);
+          const waterData = await waterResp.json();
+          f.waterCheck = { valid: waterData.on_water };
+          updateCheckStatus(index, 'water', waterData.valid ? 'success' : 'failed');
+        } catch (e) {
+          f.waterCheck = { valid: false, distance: null, message: 'Water check failed' };
+          updateCheckStatus(index, 'water', 'failed');
+        }
+
+        // Population check
+        updateCheckStatus(index, 'population', 'loading');
+        try {
+          const popResp = await fetch(`${API_CONFIG.worldpop}?latitude=${y}&longitude=${x}`);
+          const popData = await popResp.json();
+          const population = popData.population || 0; // total population within ~1km
+
+          f.populationDensity = {
+            valid: population > 100, // consider "valid" if more than 100 people nearby
+            population,
+            message: `Population ~1km: ${population}`
+          };
+
+          updateCheckStatus(index, 'population', f.populationDensity.valid ? 'success' : 'failed');
+        } catch (e) {
+          f.populationDensity = { valid: false, population: 0, message: 'Population check failed' };
+          updateCheckStatus(index, 'population', 'failed');
+        }
+
+        // Overture match
+        updateCheckStatus(index, 'overture', 'loading');
+        try {
+          const overtureResp = await fetch(`${API_CONFIG.overture}?lat=${y}&lon=${x}`);
+          const overtureData = await overtureResp.json();
+          f.overtureMatch = overtureData.valid
+            ? { valid: true, message: overtureData.message, score: 100 }
+            : { valid: false, message: overtureData.message || 'No nearby place', score: 0 };
+          updateCheckStatus(index, 'overture', overtureData.valid ? 'success' : 'failed');
+        } catch (e) {
+          f.overtureMatch = { valid: false, message: 'Overture check failed', score: 0 };
+          updateCheckStatus(index, 'overture', 'failed');
+        }
+
+        // Calculate overall score
+        f.overallScore = Math.round(
+          (f.countryBoundary.valid ? 1 : 0) * 20 +
+          f.adminAreaMatch.score * 0.15 +
+          (f.duplicateCheck.valid ? 1 : 0) * 15 +
+          (f.roadDistance.valid ? 1 : 0) * 10 +
+          (f.buildingDistance.valid ? 1 : 0) * 10 +
+          (f.waterCheck.valid ? 1 : 0) * 10 +
+          (f.populationDensity.valid ? 1 : 0) * 10 +
+          (f.overtureMatch.valid ? 1 : 0) * 25
+        );
+
+        updateFacilityStatus(index, 'complete', `Score: ${f.overallScore}%`);
+        return f;
+      }
+
+      // Process facilities in batches
+      for (let i = 0; i < uploadedData.length; i += batchSize) {
+        const batch = uploadedData.slice(i, i + batchSize);
+        const batchResults = await Promise.all(
+          batch.map((f, idx) => validateSingleFacility(f, i + idx, uploadedData.length))
+        );
+        results.push(...batchResults);
+        updateOverallProgress(results.length, uploadedData.length);
+      }
+
+      updateApiStatus(`Validation complete: ${results.length} facilities processed`);
+      displayValidationResults(results);
+      updateMap(results);
+      updateResultsTable(results);
+    }
+
+    function displayValidationResults(results) {
+      const div = document.getElementById('validationResults');
+      const valid = results.filter(r => r.overallScore >= 70).length;
+      const warn = results.filter(r => r.overallScore >= 50 && r.overallScore < 70).length;
+      const invalid = results.filter(r => r.overallScore < 50).length;
+      div.innerHTML = `
+        <div class="d-flex justify-content-between mb-2">
+          <span class="badge bg-success">Valid: ${valid}</span>
+          <span class="badge bg-warning">Warning: ${warn}</span>
+          <span class="badge bg-danger">Invalid: ${invalid}</span>
+        </div>
+      `;
+    }
+
+    function updateMap(results) {
+      map.eachLayer(l => { if (l instanceof L.Marker) map.removeLayer(l); });
+      markers = {};
+
+      results.forEach((f, i) => {
+        const color = f.overallScore >= 70 ? 'green' : f.overallScore >= 50 ? 'orange' : 'red';
+        const m = L.marker([parseFloat(f.y), parseFloat(f.x)], {
+          icon: L.divIcon({
+            className: 'custom-marker',
+            html: `<div style="background-color:${color};width:12px;height:12px;border-radius:50%;border:2px solid white;"></div>`,
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+          })
+        }).addTo(map);
+
+        m.bindPopup(`
+          <strong>${f.Name}</strong><br>
+          ${f.x}, ${f.y}<br>
+          Score: ${f.overallScore}%<br>
+          Country: ${f.countryBoundary.message}<br>
+          Water: ${f.waterCheck.message || 'N/A'}
+        `);
+
+        markers[i] = m;
+      });
+    }
+
+    function updateResultsTable(results) {
+      if ($.fn.DataTable.isDataTable('#resultsTable')) {
+        window.resultsTable.clear().destroy();
+      }
+
+      const tbody = document.getElementById('resultsBody');
+      tbody.innerHTML = '';
+
+      results.forEach(f => {
+        const row = document.createElement('tr');
+        row.className = f.overallScore >= 70 ? 'table-success' :
+          f.overallScore >= 50 ? 'table-warning' : 'table-danger';
+        row.innerHTML = `
+          <td>${f.Name}</td>
+          <td>${f.x || ''}</td>
+          <td>${f.y || ''}</td>
+          <td>${f.Admin1 || ''}</td>
+          <td>${f.Admin2 || ''}</td>
+          <td>${f.Admin3 || ''}</td>
+          <td><span class="badge ${f.countryBoundary.valid ? 'bg-success' : 'bg-danger'}">${f.countryBoundary.valid ? '✓' : '✗'}</span></td>
+          <td><span class="badge ${f.adminAreaMatch.valid ? 'bg-success' : 'bg-warning'}">${f.adminAreaMatch.valid ? '✓' : '!'}</span></td>
+          <td><span class="badge ${f.duplicateCheck.valid ? 'bg-success' : 'bg-danger'}">${f.duplicateCheck.valid ? '✓' : '✗'}</span></td>
+          <td><span class="badge ${f.roadDistance.valid ? 'bg-success' : 'bg-warning'}">${f.roadDistance.distance ? f.roadDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>
+          <td><span class="badge ${f.waterCheck.valid ? 'bg-success' : 'bg-warning'}">${f.waterCheck.valid ? '✓' : '✗'}</span></td>
+          <td><span class="badge ${f.buildingDistance.valid ? 'bg-success' : 'bg-warning'}">${f.buildingDistance.distance ? f.buildingDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>
+          <td>
+            <span class="badge ${f.populationDensity.valid ? 'bg-success' : 'bg-warning'}">
+              ${f.populationDensity.population ? f.populationDensity.population.toLocaleString() : 'N/A'}
+            </span>
+          </td>
+          <td><span class="badge ${f.overtureMatch.valid ? 'bg-success' : 'bg-secondary'}">${f.overtureMatch.valid ? '✓' : '✗'}</span></td>
+          <td><span class="badge ${f.overallScore >= 70 ? 'bg-success' : f.overallScore >= 50 ? 'bg-warning' : 'bg-danger'}">${f.overallScore}%</span></td>
+        `;
+        tbody.appendChild(row);
+      });
+
+      window.resultsTable = $('#resultsTable').DataTable({
+        pageLength: 10,
+        responsive: true,
+        order: [],
+        scrollY: "400px",
+        scrollCollapse: true,
+        scrollX: true
+      });
+
+      $('#resultsTable tbody').off('click').on('click', 'tr', function () {
+        const rowIndex = window.resultsTable.row(this).index();
+        const marker = markers[rowIndex];
+        if (marker) {
+          map.setView(marker.getLatLng(), 16);
+          marker.openPopup();
+        }
+      });
+    }
+
+    function updateApiStatus(msg) {
+      document.getElementById('apiStatus').textContent = msg;
+    }
+  </script>
+
+</body>
+
+</html>
