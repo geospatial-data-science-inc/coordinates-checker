@@ -1,0 +1,182 @@
+body {
+      font-family: 'Segoe UI', sans-serif;
+      padding: 20px;
+      background: #ffffff;
+    }
+
+    .dashboard-container {
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .validation-section {
+      margin-bottom: 30px;
+      padding: 15px;
+      border: 1px solid #e9ecef;
+      border-radius: 5px;
+    }
+
+    .outer-container {
+      display: grid;
+      grid-template-columns: auto 1fr 1fr;
+      gap: 20px;
+    }
+
+    .outer-container>div {
+      min-width: 0;
+    }
+
+    .map-container {
+      height: 550px;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .table-container {
+      overflow: hidden;
+    }
+
+    .progress {
+      height: 10px;
+      margin-top: 5px;
+    }
+
+    #resultsTable thead select {
+      font-size: 12px;
+      padding: 2px 4px;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      background-color: #fff;
+    }
+
+    #resultsTable thead tr:nth-child(2) th {
+      padding: 2px !important;
+    }
+
+    /* Progress Tracker Styles */
+    .progress-tracker {
+      background: #f8f9fa;
+      border-radius: 5px;
+      padding: 15px;
+      margin-top: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+
+    .facility-progress {
+      margin-bottom: 15px;
+      padding: 10px;
+      background: white;
+      border-radius: 5px;
+      border: 1px solid #dee2e6;
+    }
+
+    .facility-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .facility-name {
+      font-weight: 600;
+      color: #333;
+      font-size: 13px;
+    }
+
+    .facility-status {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 3px;
+    }
+
+    .status-processing {
+      background: #fff3cd;
+      color: #856404;
+    }
+
+    .status-complete {
+      background: #d1e7dd;
+      color: #0f5132;
+    }
+
+    .status-error {
+      background: #f8d7da;
+      color: #842029;
+    }
+
+    .api-checks {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 5px;
+      font-size: 10px;
+    }
+
+    .api-check {
+      padding: 4px 6px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .check-pending {
+      background: #e9ecef;
+      color: #6c757d;
+    }
+
+    .check-loading {
+      background: #cfe2ff;
+      color: #084298;
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    .check-success {
+      background: #d1e7dd;
+      color: #0f5132;
+    }
+
+    .check-failed {
+      background: #f8d7da;
+      color: #842029;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.6;
+      }
+    }
+
+    .spinner-icon {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .overall-progress {
+      margin-top: 10px;
+    }
+
+    .progress-summary {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      margin-bottom: 5px;
+    }

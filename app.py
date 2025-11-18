@@ -1,202 +1,244 @@
 from flask import Flask, request, jsonify
-import requests
 from flask_cors import CORS
 import duckdb
+from concurrent.futures import ThreadPoolExecutor
+import requests
+import time
+import json
 
 app = Flask(__name__)
 CORS(app)
 
 # -----------------------------
-# External API constants
+# Thread pool for parallel processing
+executor = ThreadPoolExecutor(max_workers=3)  # safe for 8GB RAM
+
 # -----------------------------
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-WORLDPOP_TEMPLATE = (
-    "https://api.worldpop.org/v1/services/stats?"
-    "dataset=ppp_2020_1km_Aggregated&latitude={lat}&longitude={lon}&radius=1"
+# DuckDB persistent cache (on a volume, e.g., /data/cache.db on Render)
+conn = duckdb.connect(database='/data/cache.db')  
+conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
+
+# Cache table
+conn.execute("""
+CREATE TABLE IF NOT EXISTS duckdb_cache (
+    key TEXT PRIMARY KEY,
+    result JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
+""")
+
+# -----------------------------
+# Helper functions for persistent cache
+def get_cache(key):
+    row = conn.execute("SELECT result FROM duckdb_cache WHERE key = ?", (key,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+def set_cache(key, result):
+    conn.execute("""
+        INSERT INTO duckdb_cache(key, result)
+        VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET result=excluded.result
+    """, (key, json.dumps(result)))
+
+# -----------------------------
+# Constants
+BUCKET = "s3://overturemaps-us-west-2/release/2025-10-22.0"
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+WORLDPOP_DATASET = "wpgppop"
+WORLDPOP_YEAR = 2020
+WORLDPOP_TEMPLATE = "https://api.worldpop.org/v1/services/stats"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
 # -----------------------------
-# Overture (DuckDB) setup
-# -----------------------------
-OVERTURE_RELEASE = "2025-10-22.0"
-BUCKET = f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE}"
+# Core DuckDB query function with persistent caching
+def query_duckdb(table, type_, lat, lon, delta=0.01):
+    key = f"{table}_{type_}_{round(lat,4)}_{round(lon,4)}"
+    cached = get_cache(key)
+    if cached is not None:
+        return cached
 
-def query_duckdb(theme, type_, lat, lon, delta=0.02):
-    """Query Overture S3 data around given coordinates using DuckDB (no credentials needed)."""
+    path_pattern = f"{BUCKET}/theme={table}/type={type_}/*"
     query = f"""
-    INSTALL spatial;
-    LOAD spatial;
     SELECT id,
-           names.primary AS name,
-           ST_Distance(ST_Point({lon}, {lat}), geometry) AS distance
-    FROM read_parquet('{BUCKET}/theme={theme}/type={type_}/*',
-                      filename=true, hive_partitioning=1)
+           COALESCE(names.primary, NULL) AS name,
+           ST_Distance(ST_Point({lon}, {lat})::GEOMETRY, geometry) AS distance
+    FROM read_parquet('{path_pattern}', filename=True, hive_partitioning=1)
     WHERE bbox.xmin BETWEEN {lon - delta} AND {lon + delta}
       AND bbox.ymin BETWEEN {lat - delta} AND {lat + delta}
     ORDER BY distance
     LIMIT 1;
     """
     try:
-        df = duckdb.query(query).to_df()
-        if df.empty:
-            return None
-        return df.iloc[0].to_dict()
+        result = conn.execute(query).fetchone()
+        if result:
+            obj = {"id": result[0], "name": result[1], "distance": float(result[2])}
+        else:
+            obj = None
+        set_cache(key, obj)
+        return obj
     except Exception as e:
         print(f"[DuckDB error] {e}")
+        set_cache(key, None)
         return None
 
+# -----------------------------
+# Water check
+def is_point_on_water(lat, lon, delta=0.01):
+    key = f"water_{round(lat,4)}_{round(lon,4)}"
+    cached = get_cache(key)
+    if cached is not None:
+        return cached
+    query = f"""
+    SELECT COUNT(*) > 0 AS on_water
+    FROM read_parquet('{BUCKET}/theme=base/type=water/*', filename=True, hive_partitioning=1)
+    WHERE bbox.xmin BETWEEN {lon - delta} AND {lon + delta}
+      AND bbox.ymin BETWEEN {lat - delta} AND {lat + delta}
+      AND ST_Intersects(ST_Point({lon}, {lat})::GEOMETRY, geometry);
+    """
+    try:
+        result = conn.execute(query).fetchone()
+        on_water = bool(result[0]) if result else False
+        set_cache(key, on_water)
+        return on_water
+    except Exception as e:
+        print(f"[DuckDB water check error] {e}")
+        set_cache(key, False)
+        return False
 
 # -----------------------------
-# 1. Overture (Healthcare fallback via Overpass)
+# WorldPop population (~1km)
+def point_to_geojson(lat, lon, delta=0.01):
+    return {
+        "type": "Polygon",
+        "coordinates": [[
+            [lon - delta, lat - delta],
+            [lon + delta, lat - delta],
+            [lon + delta, lat + delta],
+            [lon - delta, lat + delta],
+            [lon - delta, lat - delta]
+        ]]
+    }
+
+def get_worldpop_population(lat, lon):
+    key = f"worldpop_{round(lat,4)}_{round(lon,4)}"
+    cached = get_cache(key)
+    if cached:
+        return cached
+
+    geojson = json.dumps({"type":"FeatureCollection","features":[{"type":"Feature","properties":{},"geometry":point_to_geojson(lat, lon)}]})
+    params = {"dataset": WORLDPOP_DATASET, "year": WORLDPOP_YEAR, "geojson": geojson, "runasync":"false"}
+
+    try:
+        r = requests.get(WORLDPOP_TEMPLATE, params=params, timeout=30)
+        r.raise_for_status()
+        population = r.json().get("data", {}).get("total_population", 0)
+    except Exception as e:
+        print(f"[WorldPop error] {e}")
+        population = 0
+
+    set_cache(key, {"population": population})
+    return {"population": population}
+
 # -----------------------------
-@app.route("/api/overture", methods=["GET"])
-def overture_alternative():
+# Nominatim reverse geocode with persistent caching
+def nominatim_lookup(lat, lon):
+    key = f"nominatim_{round(lat,4)}_{round(lon,4)}"
+    cached = get_cache(key)
+    if cached:
+        return cached
+    try:
+        r = requests.get(NOMINATIM_URL, params={"format":"json","lat":lat,"lon":lon,"addressdetails":1},
+                         headers={"User-Agent":"CoordinateChecker/1.0"}, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print(f"[Nominatim error] {e}")
+        data = {}
+    set_cache(key, data)
+    return data
+
+# -----------------------------
+# Flask endpoints
+@app.route("/api/validate_batch", methods=["POST"])
+def validate_batch():
+    data = request.json
+    coordinates = data.get('coordinates', [])
+    if not coordinates:
+        return jsonify({"error": "No coordinates provided"}), 400
+
+    def validate_single(coord):
+        lat = float(coord['lat'])
+        lon = float(coord['lon'])
+        result = {"lat": lat, "lon": lon, "name": coord.get('name', 'Unknown')}
+
+        result["building"] = query_duckdb("buildings", "building", lat, lon)
+        result["road"] = query_duckdb("transportation", "segment", lat, lon)
+        result["water"] = is_point_on_water(lat, lon)
+        result["place"] = query_duckdb("places", "place", lat, lon)
+        result["population"] = get_worldpop_population(lat, lon)
+
+        return result
+
+    results = list(executor.map(validate_single, coordinates))
+    return jsonify({"results": results})
+
+@app.route("/api/worldpop", methods=["GET"])
+def worldpop():
+    try:
+        lat = float(request.args.get("lat") or request.args.get("latitude"))
+        lon = float(request.args.get("lon") or request.args.get("longitude"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid or missing coordinates"}), 400
+
+    return jsonify(get_worldpop_population(lat, lon))
+
+@app.route("/api/nominatim", methods=["GET"])
+def nominatim():
     try:
         lat = float(request.args.get("lat"))
         lon = float(request.args.get("lon"))
-        radius = float(request.args.get("radius", 100))
     except (TypeError, ValueError):
-        return jsonify({"error": "Invalid or missing lat/lon/radius"}), 400
+        return jsonify({"error": "Invalid coordinates"}), 400
 
-    overpass_query = f"""
-    [out:json][timeout:25];
-    (
-      node["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
-      way["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
-      relation["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
-    );
-    out center;
-    """
+    return jsonify(nominatim_lookup(lat, lon))
 
-    try:
-        response = requests.post(OVERPASS_URL, data=overpass_query, timeout=60)
-        response.raise_for_status()
-        data = response.json()
-        features = []
-        for el in data.get("elements", []):
-            if "lat" in el and "lon" in el:
-                el_lat, el_lon = el["lat"], el["lon"]
-            elif "center" in el:
-                el_lat, el_lon = el["center"]["lat"], el["center"]["lon"]
-            else:
-                continue
-            features.append({
-                "name": el.get("tags", {}).get("name", "Unnamed"),
-                "type": el.get("tags", {}).get("amenity", "unknown"),
-                "lat": el_lat,
-                "lon": el_lon
-            })
-        return jsonify({"features": features})
-    except requests.exceptions.RequestException as e:
-        return jsonify({"features": [], "error": str(e)}), 502
-
-
-# -----------------------------
-# 2. WorldPop
-# -----------------------------
-@app.route("/api/worldpop", methods=["GET"])
-def worldpop():
-    lat = request.args.get("lat") or request.args.get("latitude")
-    lon = request.args.get("lon") or request.args.get("longitude")
-    url = WORLDPOP_TEMPLATE.format(lat=lat, lon=lon)
-    r = requests.get(url)
-    try:
-        return jsonify(r.json())
-    except ValueError:
-        return jsonify({"error": "WorldPop returned invalid JSON", "text": r.text}), 502
-
-
-# -----------------------------
-# 3. Nominatim (reverse geocode)
-# -----------------------------
-@app.route("/api/nominatim", methods=["GET"])
-def nominatim():
-    lat = request.args.get("lat")
-    lon = request.args.get("lon")
-    params = {
-        "format": "json",
-        "lat": lat,
-        "lon": lon,
-        "addressdetails": 1
-    }
-    r = requests.get(NOMINATIM_URL, params=params, headers={"User-Agent": "CoordinateChecker/1.0"})
-    return jsonify(r.json())
-
-
-# -----------------------------
-# 4. Generic Overpass passthrough
-# -----------------------------
-@app.route("/api/overpass", methods=["POST"])
-def overpass():
-    try:
-        query = request.data.decode("utf-8")
-        if not query:
-            return jsonify({"error": "Empty Overpass query"}), 400
-
-        r = requests.post(OVERPASS_URL, data=query, timeout=60)
-        r.raise_for_status()
-        data = r.json()
-        return jsonify({"elements": data.get("elements", [])})
-    except requests.exceptions.RequestException as e:
-        return jsonify({"error": str(e)}), 502
-
-
-# -----------------------------
-# 5. NEW — Overture + DuckDB Distance APIs
-# -----------------------------
 @app.route("/api/building_distance", methods=["GET"])
 def building_distance():
     lat = float(request.args.get("lat"))
     lon = float(request.args.get("lon"))
     row = query_duckdb("buildings", "building", lat, lon)
-    if not row:
-        return jsonify({"valid": False, "distance": None, "msg": "No building nearby"})
-    return jsonify({"valid": True, "distance": round(float(row["distance"]), 2), "msg": "Nearest building distance"})
-
+    return {"valid": row is not None, "distance": round(row["distance"], 2) if row else None}
 
 @app.route("/api/road_distance", methods=["GET"])
 def road_distance():
     lat = float(request.args.get("lat"))
     lon = float(request.args.get("lon"))
     row = query_duckdb("transportation", "segment", lat, lon)
-    if not row:
-        return jsonify({"valid": False, "distance": None, "msg": "No road nearby"})
-    return jsonify({"valid": True, "distance": round(float(row["distance"]), 2), "msg": "Nearest road distance"})
+    return {"valid": row is not None, "distance": round(row["distance"], 2) if row else None}
 
-@app.route("/api/water_distance", methods=["GET"])
-def water_distance():
+@app.route("/api/water_check", methods=["GET"])
+def water_check():
     lat = float(request.args.get("lat"))
     lon = float(request.args.get("lon"))
-    # Query Overture for water sources
-    row = query_duckdb("water", "water_point", lat, lon)
-
-    if not row:
-        return jsonify({"valid": False, "distance": None, "msg": "No water source nearby"})
-    
-    return jsonify({
-        "valid": True,
-        "distance": round(float(row["distance"]), 2),
-        "msg": "Nearest water source distance"
-    })
-
+    on_water = is_point_on_water(lat, lon)
+    return {"on_water": on_water, "message": "Point is on water" if on_water else "Point is on land"}
 
 @app.route("/api/overture_match", methods=["GET"])
 def overture_match():
     lat = float(request.args.get("lat"))
     lon = float(request.args.get("lon"))
     row = query_duckdb("places", "place", lat, lon)
-    if not row:
-        return jsonify({"valid": False, "message": "No nearby place found"})
-    return jsonify({
-        "valid": True,
-        "message": f"Closest Overture entity: {row.get('name', 'unknown')}",
-        "distance": round(float(row["distance"]), 2)
-    })
+    return {"valid": row is not None, "distance": round(row["distance"], 2) if row else None, "name": row.get("name") if row else None}
 
+@app.route("/api/overpass", methods=["POST"])
+def overpass():
+    try:
+        query = request.data.decode("utf-8")
+        r = requests.post(OVERPASS_URL, data=query, timeout=60)
+        r.raise_for_status()
+        return jsonify({"elements": r.json().get("elements", [])})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
 
-# -----------------------------
-# Run Flask
-# -----------------------------
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000, threaded=True)
