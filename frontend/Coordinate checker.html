@@ -555,7 +555,7 @@
           ${f.x}, ${f.y}<br>
           Score: ${f.overallScore}%<br>
           Country: ${f.countryBoundary.message}<br>
-          Water: ${f.waterCheck.message || 'N/A'}
+          Water: ${f?.waterCheck?.on_water || 'N/A'}
         `);
 
         markers[i] = m;
@@ -585,7 +585,7 @@
           <td><span class="badge ${f.adminAreaMatch.valid ? 'bg-success' : 'bg-warning'}">${f.adminAreaMatch.valid ? '✓' : '!'}</span></td>
           <td><span class="badge ${f.duplicateCheck.valid ? 'bg-success' : 'bg-danger'}">${f.duplicateCheck.valid ? '✓' : '✗'}</span></td>
           <td><span class="badge ${f.roadDistance.valid ? 'bg-success' : 'bg-warning'}">${f.roadDistance.distance ? f.roadDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>
-          <td><span class="badge ${f.waterCheck.valid ? 'bg-success' : 'bg-warning'}">${f.waterCheck.valid ? '✓' : '✗'}</span></td>
+          <td><span class="badge ${f.waterCheck?.on_water ? 'bg-success' : 'bg-warning'}">${f.waterCheck?.on_water ? '✓' : '✗'}</span></td>
           <td><span class="badge ${f.buildingDistance.valid ? 'bg-success' : 'bg-warning'}">${f.buildingDistance.distance ? f.buildingDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>
           <td>
             <span class="badge ${f.populationDensity.valid ? 'bg-success' : 'bg-warning'}">
