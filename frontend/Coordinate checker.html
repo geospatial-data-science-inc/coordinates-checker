@@ -102,13 +102,13 @@
                   <th>Admin3</th>
                   <th>Country</th>
                   <th>Admin Area</th>
-                  <th>Duplicates</th>
-                  <th>Road</th>
-                  <th>Water</th>
-                  <th>Building</th>
+                  <th>Duplicate</th>
+                  <th>Nearby Road</th>
+                  <th>On Water</th>
+                  <th>Nearby Building</th>
                   <th>Population</th>
-                  <th>Overture</th>
                   <th>Score</th>
+                  <!-- <th>Overture</th> -->
                 </tr>
               </thead>
               <tbody id="resultsBody"></tbody>
@@ -295,12 +295,12 @@
             <span>Population</span>
             <span>⏳</span>
           </div>
-          <div class="api-check check-pending" id="check-overture-${index}">
-            <span>Overture</span>
-            <span>⏳</span>
           </div>
-        </div>
-      `;
+          `;
+      // <div class="api-check check-pending" id="check-overture-${index}">
+      //   <span>Overture</span>
+      //   <span>⏳</span>
+      // </div>
       return card;
     }
 
@@ -421,9 +421,10 @@
         try {
           const roadResp = await fetch(`${API_CONFIG.road_distance}?lat=${y}&lon=${x}`);
           const roadData = await roadResp.json();
+          console.log(roadData)
           f.roadDistance = roadData.valid
             ? { valid: true, distance: roadData.distance, message: roadData.message }
-            : { valid: false, distance: null, message: roadData.message || 'No road nearby' };
+            : { valid: false, distance: null, message: roadData.message || 'No road nearby' }; // Change to valid: false
           updateCheckStatus(index, 'road', roadData.valid ? 'success' : 'failed');
         } catch (e) {
           f.roadDistance = { valid: false, distance: null, message: 'Road distance failed' };
@@ -435,6 +436,7 @@
         try {
           const buildResp = await fetch(`${API_CONFIG.building_distance}?lat=${y}&lon=${x}`);
           const buildData = await buildResp.json();
+          console.log("building", buildData)
           f.buildingDistance = buildData.valid
             ? { valid: true, distance: buildData.distance, message: buildData.message }
             : { valid: false, distance: null, message: buildData.message || 'No building nearby' };
@@ -449,8 +451,9 @@
         try {
           const waterResp = await fetch(`${API_CONFIG.water_check}?lat=${y}&lon=${x}`);
           const waterData = await waterResp.json();
+          console.log("water", waterData); // Check what's actually in the response
           f.waterCheck = { valid: waterData.on_water };
-          updateCheckStatus(index, 'water', waterData.valid ? 'success' : 'failed');
+          updateCheckStatus(index, 'water', waterData.on_water ? 'failed' : 'success'); // Use on_water here too
         } catch (e) {
           f.waterCheck = { valid: false, distance: null, message: 'Water check failed' };
           updateCheckStatus(index, 'water', 'failed');
@@ -476,18 +479,18 @@
         }
 
         // Overture match
-        updateCheckStatus(index, 'overture', 'loading');
-        try {
-          const overtureResp = await fetch(`${API_CONFIG.overture}?lat=${y}&lon=${x}`);
-          const overtureData = await overtureResp.json();
-          f.overtureMatch = overtureData.valid
-            ? { valid: true, message: overtureData.message, score: 100 }
-            : { valid: false, message: overtureData.message || 'No nearby place', score: 0 };
-          updateCheckStatus(index, 'overture', overtureData.valid ? 'success' : 'failed');
-        } catch (e) {
-          f.overtureMatch = { valid: false, message: 'Overture check failed', score: 0 };
-          updateCheckStatus(index, 'overture', 'failed');
-        }
+        // updateCheckStatus(index, 'overture', 'loading');
+        // try {
+        //   const overtureResp = await fetch(`${API_CONFIG.overture}?lat=${y}&lon=${x}`);
+        //   const overtureData = await overtureResp.json();
+        //   f.overtureMatch = overtureData.valid
+        //     ? { valid: true, message: overtureData.message, score: 100 }
+        //     : { valid: false, message: overtureData.message || 'No nearby place', score: 0 };
+        //   updateCheckStatus(index, 'overture', overtureData.valid ? 'success' : 'failed');
+        // } catch (e) {
+        //   f.overtureMatch = { valid: false, message: 'Overture check failed', score: 0 };
+        //   updateCheckStatus(index, 'overture', 'failed');
+        // }
 
         // Calculate overall score
         f.overallScore = Math.round(
@@ -496,10 +499,10 @@
           (f.duplicateCheck.valid ? 1 : 0) * 15 +
           (f.roadDistance.valid ? 1 : 0) * 10 +
           (f.buildingDistance.valid ? 1 : 0) * 10 +
-          (f.waterCheck.valid ? 1 : 0) * 10 +
-          (f.populationDensity.valid ? 1 : 0) * 10 +
-          (f.overtureMatch.valid ? 1 : 0) * 25
+          (!f.waterCheck.on_water ? 1 : 0) * 10 +
+          (f.populationDensity.valid ? 1 : 0) * 10
         );
+        // (f.overtureMatch.valid ? 1 : 0) * 25
 
         updateFacilityStatus(index, 'complete', `Score: ${f.overallScore}%`);
         return f;
@@ -584,18 +587,16 @@
           <td><span class="badge ${f.countryBoundary.valid ? 'bg-success' : 'bg-danger'}">${f.countryBoundary.valid ? '✓' : '✗'}</span></td>
           <td><span class="badge ${f.adminAreaMatch.valid ? 'bg-success' : 'bg-warning'}">${f.adminAreaMatch.valid ? '✓' : '!'}</span></td>
           <td><span class="badge ${f.duplicateCheck.valid ? 'bg-success' : 'bg-danger'}">${f.duplicateCheck.valid ? '✓' : '✗'}</span></td>
-          <td><span class="badge ${f.roadDistance.valid ? 'bg-success' : 'bg-warning'}">${f.roadDistance.distance ? f.roadDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>
-          <td><span class="badge ${f.waterCheck?.on_water ? 'bg-success' : 'bg-warning'}">${f.waterCheck?.on_water ? '✓' : '✗'}</span></td>
-          <td><span class="badge ${f.buildingDistance.valid ? 'bg-success' : 'bg-warning'}">${f.buildingDistance.distance ? f.buildingDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>
-          <td>
+          <td><span class="badge ${f.roadDistance.valid ? 'bg-success' : 'bg-warning'}">${f.roadDistance.distance >= 0 ? f.roadDistance.distance.toFixed(0) + 'm' : 'N/A'}</span></td>          <td><span class="badge ${!f.waterCheck?.on_water ? 'bg-success' : 'bg-warning'}">${!f.waterCheck?.on_water ? '✓' : '✗'}</span></td>
+          <td><span class="badge ${f.buildingDistance.valid ? 'bg-success' : 'bg-warning'}">${f.buildingDistance.distance !== null ? (f.buildingDistance.distance === 0 ? 'At location' : f.buildingDistance.distance.toFixed(0) + 'm') : 'N/A'}</span></td>          <td>
             <span class="badge ${f.populationDensity.valid ? 'bg-success' : 'bg-warning'}">
               ${f.populationDensity.population ? f.populationDensity.population.toLocaleString() : 'N/A'}
             </span>
           </td>
-          <td><span class="badge ${f.overtureMatch.valid ? 'bg-success' : 'bg-secondary'}">${f.overtureMatch.valid ? '✓' : '✗'}</span></td>
           <td><span class="badge ${f.overallScore >= 70 ? 'bg-success' : f.overallScore >= 50 ? 'bg-warning' : 'bg-danger'}">${f.overallScore}%</span></td>
-        `;
+          `;
         tbody.appendChild(row);
+        // <td><span class="badge ${f.overtureMatch.valid ? 'bg-success' : 'bg-secondary'}">${f.overtureMatch.valid ? '✓' : '✗'}</span></td>
       });
 
       window.resultsTable = $('#resultsTable').DataTable({

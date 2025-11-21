@@ -50,48 +50,71 @@ def flush_cache_buffer():
 atexit.register(flush_cache_buffer)
 
 # -----------------------------
-# Cache helpers using Supabase table
-def safe_maybe_single(res):
-    """Return res.data if present, otherwise None."""
-    try:
-        return res.data if hasattr(res, "data") else (res[0] if res else None)
-    except Exception:
-        return None
-
 def get_cache(key):
-    """Load cached value for a given key from Supabase cache table."""
+    """Load cached value for a given key.
+    Returns:
+        - None: No cache entry exists (need to do lookup)
+        - Any value: Cache entry exists (could be data, None, dict, etc.)
+    """
     try:
-        res = supabase.table("cache").select("value").eq("key", key).maybe_single().execute()
-        data = safe_maybe_single(res)
-        if not data:
+        res = supabase.table("cache").select("value").eq("key", key).execute()
+        
+        # Check if we got any results
+        if not res.data or len(res.data) == 0:
+            return None  # No cache entry at all
+            
+        # Get the first result
+        cache_entry = res.data[0]
+        cached_value = cache_entry.get("value")
+        
+        # If value is None in database, that means no cache entry
+        if cached_value is None:
             return None
-        val = data.get("value") if isinstance(data, dict) and "value" in data else data
-        if val is None:
-            return None
-        if isinstance(val, str):
+            
+        # Parse JSON strings
+        if isinstance(cached_value, str):
             try:
-                return json.loads(val)
-            except Exception:
-                return val
-        return val
+                return json.loads(cached_value)
+            except json.JSONDecodeError:
+                # If it's not valid JSON, check for string "null"
+                if cached_value == '"null"' or cached_value == "null":
+                    return None  # This is a cached "nothing found" result
+                return cached_value
+        else:
+            # If it's already a Python object, return it directly
+            # This could be None (meaning "nothing found"), a dict, etc.
+            return cached_value
+            
     except Exception as e:
-        print(f"[Cache get error] {e}")
-        return None
+        print(f"[Cache get error for key {key}]: {e}")
+        return None  # Error means no cache entry
+
 
 def set_cache(key, value):
     """Buffer cache writes instead of writing immediately to reduce write QPS."""
     global CACHE_BUFFER
     try:
+        # Store proper JSON null instead of string "null"
+        if value is None:
+            cache_value = None
+        else:
+            cache_value = json.dumps(value)
+            
         entry = {
             "key": key,
-            "value": json.dumps(value),
+            "value": cache_value,
         }
+        
+        # Remove any existing entry with the same key to avoid duplicates
+        CACHE_BUFFER = [e for e in CACHE_BUFFER if e["key"] != key]
+        
+        # Add the new entry
         CACHE_BUFFER.append(entry)
+        
         if len(CACHE_BUFFER) >= CACHE_BUFFER_LIMIT:
             flush_cache_buffer()
     except Exception as e:
         print(f"[Cache set error] {e}")
-
 # -----------------------------
 # External API constants
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -110,30 +133,155 @@ conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
 conn.execute("SET s3_region='us-west-2'; SET memory_limit='4GB'; SET threads=2;")
 
 # -----------------------------
-# Cached DuckDB query function with Supabase caching
-def query_duckdb_with_cache(table, type_, lat, lon, delta=0.01):
-    """Step 1: Check Supabase cache, Step 2: Use DuckDB if not found, Step 3: Store result in Supabase"""
+# Overpass helper functions
+def overpass_query(query):
+    """Generic overpass POST helper."""
+    try:
+        r = requests.post(OVERPASS_URL, data=query, timeout=30)
+        r.raise_for_status()
+        return r.json().get("elements", [])
+    except Exception as e:
+        print(f"[Overpass request failed] {e}")
+        return []
+
+def overpass_nearest_building(lat, lon, radius=200):
+    """Return the nearest building (node/way) within radius (meters)."""
+    q = f"""
+    [out:json][timeout:25];
+    (
+      node(around:{radius},{lat},{lon})[building];
+      way(around:{radius},{lat},{lon})[building];
+      relation(around:{radius},{lat},{lon})[building];
+    );
+    out center qt 1;
+    """
+    elems = overpass_query(q)
+    if not elems:
+        return None
+    # Compute simple distance approx using lat/lon
+    def dist(e):
+        if "center" in e:
+            elat = e["center"]["lat"]; elon = e["center"]["lon"]
+        else:
+            elat = e.get("lat"); elon = e.get("lon")
+        if elat is None or elon is None: return float("inf")
+        return ((elat - lat)**2 + (elon - lon)**2)**0.5
+    elems.sort(key=dist)
+    e = elems[0]
+    # pick lat/lon from center or point
+    if "center" in e:
+        elat = e["center"]["lat"]; elon = e["center"]["lon"]
+    else:
+        elat = e.get("lat"); elon = e.get("lon")
+    return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
+
+def overpass_nearest_road(lat, lon, radius=500):
+    q = f"""
+    [out:json][timeout:25];
+    (
+      way(around:{radius},{lat},{lon})[highway];
+      way(around:{radius},{lat},{lon})[route];
+    );
+    out geom qt;
+    """
+    elems = overpass_query(q)
+    if not elems:
+        return None
+    # Similar nearest pick by centroid
+    def centroid(e):
+        if "center" in e:
+            return e["center"]["lat"], e["center"]["lon"]
+        geom = e.get("geometry") or []
+        if not geom: return None, None
+        lat_sum = sum(pt["lat"] for pt in geom)/len(geom)
+        lon_sum = sum(pt["lon"] for pt in geom)/len(geom)
+        return lat_sum, lon_sum
+    best = None; best_d = float("inf")
+    for e in elems:
+        elat, elon = centroid(e)
+        if elat is None: continue
+        d = ((elat - lat)**2 + (elon - lon)**2)**0.5
+        if d < best_d:
+            best_d = d; best = e
+    if not best:
+        return None
+    return {"id": best.get("id"), "name": best.get("tags", {}).get("name"), "distance": best_d, "source": "overpass"}
+
+def overpass_nearest_place(lat, lon, radius=2000):
+    q = f"""
+    [out:json][timeout:25];
+    (
+      node(around:{radius},{lat},{lon})["place"];
+      way(around:{radius},{lat},{lon})["place"];
+      relation(around:{radius},{lat},{lon})["place"];
+    );
+    out center qt 1;
+    """
+    elems = overpass_query(q)
+    if not elems:
+        return None
+    def dist(e):
+        if "center" in e:
+            elat = e["center"]["lat"]; elon = e["center"]["lon"]
+        else:
+            elat = e.get("lat"); elon = e.get("lon")
+        if elat is None: return float("inf")
+        return ((elat - lat)**2 + (elon - lon)**2)**0.5
+    elems.sort(key=dist)
+    e = elems[0]
+    return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
+
+def overpass_water_check(lat, lon, radius=50):
+    q = f"""
+    [out:json][timeout:25];
+    (
+      way(around:{radius},{lat},{lon})["water"];
+      relation(around:{radius},{lat},{lon})["water"];
+      node(around:{radius},{lat},{lon})[natural=water];
+      node(around:{radius},{lat},{lon})[water];
+    );
+    out qt 1;
+    """
+    elems = overpass_query(q)
+    return len(elems) > 0
+
+# -----------------------------
+def query_with_fallback(table, type_, lat, lon, overpass_function=None, duckdb_delta=0.01):
+    """
+    3-Step Process using old cache format:
+    1. Check Supabase cache (old format: duckdb_table_type_lat_lon)
+    2. If not found, try DuckDB/Overture
+    3. If DuckDB fails, try Overpass
+    4. Store final result in Supabase (even if all failed)
+    """
     lat_r = round(lat, 4)
     lon_r = round(lon, 4)
-    cache_key = f"duckdb_{table}_{type_}_{lat_r}_{lon_r}"
     
-    # Step 1: Check Supabase cache
+    # Step 1: Check Supabase cache using old format
+    cache_key = f"duckdb_{table}_{type_}_{lat_r}_{lon_r}"
     cached_result = get_cache(cache_key)
+    
+    # If we got a result (even None), return it
     if cached_result is not None:
         print(f"[Cache] Hit for {table}/{type_} at ({lat_r}, {lon_r})")
         return cached_result
     
-    print(f"[Cache] Miss for {table}/{type_} at ({lat_r}, {lon_r}), querying DuckDB...")
+    # If we get here, it means no cache entry exists
+    print(f"[Cache] Miss for {table}/{type_} at ({lat_r}, {lon_r})")
     
-    # Step 2: Use DuckDB/Overture
+    # Initialize variables
+    final_result = None
+    source = "none"
+    
+    # Step 2: Try DuckDB/Overture
     path_pattern = f"{BUCKET}/theme={table}/type={type_}/*"
     query = f"""
     SELECT id,
            COALESCE(names.primary, NULL) AS name,
            ST_Distance(ST_Point({lon_r}, {lat_r})::GEOMETRY, geometry) AS distance
     FROM read_parquet('{path_pattern}', filename=True, hive_partitioning=1)
-    WHERE bbox.xmin BETWEEN {lon_r - delta} AND {lon_r + delta}
-      AND bbox.ymin BETWEEN {lat_r - delta} AND {lat_r + delta}
+    WHERE bbox.xmin BETWEEN {lon_r - duckdb_delta} AND {lon_r + duckdb_delta}
+      AND bbox.ymin BETWEEN {lat_r - duckdb_delta} AND {lat_r + duckdb_delta}
     ORDER BY distance
     LIMIT 1;
     """
@@ -141,58 +289,71 @@ def query_duckdb_with_cache(table, type_, lat, lon, delta=0.01):
     try:
         result = conn.execute(query).fetchone()
         if result:
-            db_result = {"id": result[0], "name": result[1], "distance": float(result[2])}
-            # Step 3: Store result in Supabase
-            set_cache(cache_key, db_result)
-            print(f"[DuckDB] Found and cached: {table}/{type_}")
-            return db_result
+            final_result = {
+                "id": result[0], 
+                "name": result[1], 
+                "distance": float(result[2]),
+                "source": "duckdb"
+            }
+            source = "duckdb"
+            print(f"[DuckDB] Found: {table}/{type_}")
         else:
-            # Cache None results too to avoid repeated queries
-            set_cache(cache_key, None)
+            # DuckDB found nothing
+            source = "duckdb_not_found"
             print(f"[DuckDB] No results found for {table}/{type_}")
-            return None
     except Exception as e:
         print(f"[DuckDB query error for {table}/{type_}]: {e}")
-        set_cache(cache_key, None)
-        return None
-
+        source = "duckdb_error"
+    
+    # Step 3: If DuckDB failed or found nothing, try Overpass (if overpass function provided)
+    if final_result is None and overpass_function is not None:
+        print(f"[Overpass] Trying fallback for {table}/{type_}")
+        try:
+            overpass_result = overpass_function(lat, lon)
+            if overpass_result:
+                final_result = overpass_result
+                source = "overpass"
+                print(f"[Overpass] Found: {table}/{type_}")
+            else:
+                # Overpass also found nothing
+                source = "overpass_not_found"
+                print(f"[Overpass] No results found for {table}/{type_}")
+        except Exception as e:
+            print(f"[Overpass error for {table}/{type_}]: {e}")
+            source = "overpass_error"
+    
+    # Step 4: Store final result in Supabase (using old format)
+    set_cache(cache_key, final_result)
+    print(f"[Cache] Stored result for {table}/{type_} from {source}: {final_result is not None}")
+    
+    return final_result
 # -----------------------------
-# Water check with caching
-def is_point_on_water_with_cache(lat, lon, delta=0.01):
-    """Water check with Supabase caching"""
+def is_point_on_water_with_fallback(lat, lon, delta=0.01):
+    """Simplified water check - skip expensive DuckDB queries for now"""
     lat_r = round(lat, 4)
     lon_r = round(lon, 4)
     cache_key = f"water_check_{lat_r}_{lon_r}"
     
-    # Step 1: Check cache
+    # Step 1: Check cache first
     cached_result = get_cache(cache_key)
     if cached_result is not None:
-        return cached_result
+        return bool(cached_result)
     
-    # Step 2: Query DuckDB
-    path = f"{BUCKET}/theme=base/type=water/*"
-    query = f"""
-    SELECT COUNT(*) > 0 AS on_water
-    FROM read_parquet('{path}', filename=True, hive_partitioning=1)
-    WHERE bbox.xmin BETWEEN {lon_r - delta} AND {lon_r + delta}
-      AND bbox.ymin BETWEEN {lat_r - delta} AND {lat_r + delta}
-      AND ST_Intersects(ST_Point({lon_r}, {lat_r})::GEOMETRY, geometry);
-    """
-    
+    # Step 2: Use Overpass only (much faster than DuckDB for water)
+    print(f"[Overpass] Water check for ({lat_r}, {lon_r})")
     try:
-        result = conn.execute(query).fetchone()
-        on_water = bool(result[0]) if result else False
-        # Step 3: Store in cache
-        set_cache(cache_key, on_water)
-        print(f"[Water Check] Cached result: {'on water' if on_water else 'on land'}")
-        return on_water
+        on_water = overpass_water_check(lat, lon)
+        print(f"[Overpass] Water check: {'on water' if on_water else 'on land'}")
     except Exception as e:
-        print(f"[DuckDB water check error] {e}")
-        set_cache(cache_key, False)
-        return False
-
+        print(f"[Overpass water check error] {e}")
+        on_water = False  # Default to not on water
+    
+    # Step 3: Cache the result
+    set_cache(cache_key, on_water)
+    
+    return on_water
 # -----------------------------
-# WorldPop with caching
+# WorldPop with caching (old format)
 def point_to_geojson(lat, lon, delta=0.01):
     """Create a tiny square GeoJSON polygon around a point"""
     return {
@@ -241,17 +402,17 @@ def get_worldpop_population_with_cache(lat, lon):
         r.raise_for_status()
         data = r.json()
         population = data.get("data", {}).get("total_population", 0)
-        result = {"population": population}
+        result = {"population": population, "source": "worldpop"}
     except Exception as e:
         print(f"[WorldPop error] {e}")
-        result = {"population": 0, "error": "WorldPop request failed"}
+        result = {"population": 0, "error": "WorldPop request failed", "source": "failed"}
     
     # Step 3: Store in cache
     set_cache(cache_key, result)
     return result
 
 # -----------------------------
-# Nominatim with caching and rate-limiting
+# Nominatim with caching and rate-limiting (old format)
 last_nominatim_call = 0
 NOMINATIM_DELAY = 0.5
 
@@ -280,8 +441,9 @@ def nominatim_lookup_with_cache(lat, lon):
                          headers={"User-Agent": "CoordinateChecker/1.0"}, timeout=10)
         last_nominatim_call = time.time()
         result = r.json()
+        result["source"] = "nominatim"
     except Exception as e:
-        result = {"error": str(e)}
+        result = {"error": str(e), "source": "failed"}
     
     # Step 3: Store in cache
     set_cache(cache_key, result)
@@ -302,31 +464,38 @@ def validate_batch():
         result = {'lat': lat, 'lon': lon, 'name': coord.get('name', 'Unknown')}
 
         try:
-            # All queries now use cached versions
-            building = query_duckdb_with_cache("buildings", "building", lat, lon)
+            # Use simplified queries with fallback
+            building = query_with_fallback("buildings", "building", lat, lon, overpass_nearest_building)
             result['building'] = {
                 'valid': building is not None,
-                'distance': round(building['distance'], 2) if building else None
+                'distance': round(building['distance'], 2) if building else None,
+                'source': building.get('source') if building else 'none'
             }
 
-            road = query_duckdb_with_cache("transportation", "segment", lat, lon)
+            road = query_with_fallback("transportation", "segment", lat, lon, overpass_nearest_road)
             result['road'] = {
                 'valid': road is not None,
-                'distance': round(road['distance'], 2) if road else None
+                'distance': round(road['distance'], 2) if road else None,
+                'source': road.get('source') if road else 'none'
             }
 
-            water = query_duckdb_with_cache("base", "water", lat, lon)
+            water = query_with_fallback("base", "water", lat, lon)
             result['water'] = {
                 'valid': water is not None,
-                'distance': round(water['distance'], 2) if water else None
+                'distance': round(water['distance'], 2) if water else None,
+                'source': water.get('source') if water else 'none'
             }
 
-            place = query_duckdb_with_cache("places", "place", lat, lon)
+            place = query_with_fallback("places", "place", lat, lon, overpass_nearest_place)
             result['place'] = {
                 'valid': place is not None,
                 'distance': round(place['distance'], 2) if place else None,
-                'name': place.get('name') if place else None
+                'name': place.get('name') if place else None,
+                'source': place.get('source') if place else 'none'
             }
+            
+            # Enhanced water check
+            result['on_water'] = is_point_on_water_with_fallback(lat, lon)
             
             # Additional data with caching
             result['population'] = get_worldpop_population_with_cache(lat, lon)
@@ -345,7 +514,7 @@ def validate_batch():
     return jsonify({'results': results})
 
 # -----------------------------
-# Individual endpoints (updated to use cached versions)
+# Individual endpoints (updated to use simplified versions)
 @app.route("/api/worldpop", methods=["GET"])
 def worldpop():
     try:
@@ -374,10 +543,22 @@ def building_distance():
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid coordinates"}), 400
         
-    row = query_duckdb_with_cache("buildings", "building", lat, lon)
+    row = query_with_fallback("buildings", "building", lat, lon, overpass_nearest_building)
     if not row:
-        return {"valid": False, "distance": None, "message": "No building nearby"}
-    return {"valid": True, "distance": round(row["distance"], 2), "message": "Nearest building distance"}
+        return {"valid": False, "distance": None, "message": "No building nearby", "source": "none"}
+    
+    # Convert from degrees to meters for more meaningful distances
+    # Rough conversion: 1 degree ≈ 111 km at equator
+    distance_degrees = row["distance"]
+    distance_meters = distance_degrees * 111000  # Convert to meters
+    
+    return {
+        "valid": True, 
+        "distance": round(distance_meters, 2),  # Now in meters
+        "distance_degrees": round(distance_degrees, 6),  # Keep original for reference
+        "message": "Nearest building distance",
+        "source": row.get("source", "unknown")
+    }
 
 @app.route("/api/road_distance", methods=["GET"])
 def road_distance():
@@ -387,10 +568,29 @@ def road_distance():
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid coordinates"}), 400
         
-    row = query_duckdb_with_cache("transportation", "segment", lat, lon)
+    row = query_with_fallback("transportation", "segment", lat, lon, overpass_nearest_road)
     if not row:
-        return {"valid": False, "distance": None, "message": "No road nearby"}
-    return {"valid": True, "distance": round(row["distance"], 2), "message": "Nearest road distance"}
+        return {"valid": False, "distance": None, "message": "No road nearby", "source": "none"}
+    
+    # Handle different distance units based on source
+    distance_original = row["distance"]
+    source = row.get("source", "unknown")
+    
+    if source == "overpass":
+        # Overpass returns distance in meters already
+        distance_meters = distance_original
+    else:
+        # DuckDB returns distance in degrees, convert to meters
+        # Rough conversion: 1 degree ≈ 111 km at equator
+        distance_meters = distance_original * 111000
+    
+    return {
+        "valid": True, 
+        "distance": round(distance_meters, 2),  # Always in meters
+        "distance_original": round(distance_original, 6),  # Keep original for reference
+        "message": "Nearest road distance",
+        "source": source
+    }
 
 @app.route("/api/water_check", methods=["GET"])
 def water_check():
@@ -400,7 +600,7 @@ def water_check():
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid coordinates"}), 400
         
-    on_water = is_point_on_water_with_cache(lat, lon)
+    on_water = is_point_on_water_with_fallback(lat, lon)
     return {
         "on_water": on_water,
         "message": "Point lies on water" if on_water else "Point is on land"
@@ -414,13 +614,14 @@ def overture_match():
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid coordinates"}), 400
         
-    row = query_duckdb_with_cache("places", "place", lat, lon)
+    row = query_with_fallback("places", "place", lat, lon, overpass_nearest_place)
     if not row:
-        return {"valid": False, "message": "No nearby place found"}
+        return {"valid": False, "message": "No nearby place found", "source": "none"}
     return {
         "valid": True,
-        "message": f"Closest Overture entity: {row.get('name', 'unknown')}",
-        "distance": round(float(row["distance"]), 2)
+        "message": f"Closest entity: {row.get('name', 'unknown')}",
+        "distance": round(float(row["distance"]), 2),
+        "source": row.get("source", "unknown")
     }
 
 # -----------------------------
