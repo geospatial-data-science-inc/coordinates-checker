@@ -6,3 +6,4 @@ python-dotenv==1.2.1
 supabase==2.24.0
 gunicorn==23.0.0
 pandas==2.3.3
+python-dotenv==1.2.1
