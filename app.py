@@ -168,7 +168,7 @@ BUCKET = "s3://overturemaps-us-west-2/release/2025-10-22.0"
 print("[Startup] Initializing DuckDB connection...")
 conn = duckdb.connect(database=':memory:')
 conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
-conn.execute("SET s3_region='us-west-2'; SET memory_limit='1GB'; SET threads=4;")
+conn.execute("SET s3_region='us-west-2'; SET memory_limit='256MB'; SET threads=4;")
 conn.execute("SET enable_object_cache=true;")  # Enable S3 object caching
 
 # -----------------------------
@@ -752,9 +752,9 @@ def health():
 
 
 # -----------------------------
-# Run with Gunicorn (production) or Flask dev server
+# Run with Gunicorn (Render) or Flask dev server locally
 if __name__ == "__main__":
-    # Test connections
+    # Optional: local-only connection tests
     try:
         _ = supabase.table("cache").select("key").limit(1).execute()
         print("[Supabase] connected (cache table reachable)")
@@ -768,5 +768,5 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"[Redis] connectivity warning: {e}")
 
-    # For development only - use Gunicorn in production
-    app.run(debug=False, port=5000, threaded=True)
+    # Local development only – Render uses Gunicorn
+    app.run(host="0.0.0.0", port=5000)
