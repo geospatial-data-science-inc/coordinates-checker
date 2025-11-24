@@ -51,7 +51,7 @@
           <div class="form-text">CSV columns: Name, x, y, Admin1, Admin2, Admin3</div>
 
           <button class="btn btn-primary mt-3" id="validateBtn" disabled>Validate Coordinates</button>
-          <div class="api-status mt-2" id="apiStatus"></div>
+          <div class="api-status mt-2 max-w-[100]" id="apiStatus"></div>
 
           <!-- Overall Progress Bar -->
           <div class="overall-progress" id="overallProgress" style="display:none;">
@@ -341,7 +341,7 @@
     async function validateCoordinates() {
       const country = document.getElementById('countrySelect').value;
       const results = [];
-      const batchSize = 10; // Process 10 facilities at once
+      const batchSize = 3;
 
       // Show progress section
       document.getElementById('progressSection').style.display = 'block';
@@ -494,13 +494,13 @@
 
         // Calculate overall score
         f.overallScore = Math.round(
-          (f.countryBoundary.valid ? 1 : 0) * 20 +
+          (f.countryBoundary.valid ? 1 : 0) * 30 +
           f.adminAreaMatch.score * 0.15 +
-          (f.duplicateCheck.valid ? 1 : 0) * 15 +
+          (f.duplicateCheck.valid ? 1 : 0) * 20 +
           (f.roadDistance.valid ? 1 : 0) * 10 +
           (f.buildingDistance.valid ? 1 : 0) * 10 +
-          (!f.waterCheck.on_water ? 1 : 0) * 10 +
-          (f.populationDensity.valid ? 1 : 0) * 10
+          (!f.waterCheck.on_water ? 1 : 0) * 30
+
         );
         // (f.overtureMatch.valid ? 1 : 0) * 25
 
