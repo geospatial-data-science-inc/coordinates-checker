@@ -753,20 +753,20 @@ def health():
 
 # -----------------------------
 # Run with Gunicorn (Render) or Flask dev server locally
-if __name__ == "__main__":
-    # Optional: local-only connection tests
-    try:
-        _ = supabase.table("cache").select("key").limit(1).execute()
-        print("[Supabase] connected (cache table reachable)")
-    except Exception as e:
-        print(f"[Supabase] connectivity warning: {e}")
+# if __name__ == "__main__":
+#     # Optional: local-only connection tests
+#     try:
+#         _ = supabase.table("cache").select("key").limit(1).execute()
+#         print("[Supabase] connected (cache table reachable)")
+#     except Exception as e:
+#         print(f"[Supabase] connectivity warning: {e}")
     
-    if USE_REDIS:
-        try:
-            redis_client.ping()
-            print("[Redis] connection verified")
-        except Exception as e:
-            print(f"[Redis] connectivity warning: {e}")
+#     if USE_REDIS:
+#         try:
+#             redis_client.ping()
+#             print("[Redis] connection verified")
+#         except Exception as e:
+#             print(f"[Redis] connectivity warning: {e}")
 
-    # Local development only – Render uses Gunicorn
-    #app.run(host="0.0.0.0", port=5000)
+#     # Local development only – Render uses Gunicorn
+#     app.run(host="0.0.0.0", port=5000)
