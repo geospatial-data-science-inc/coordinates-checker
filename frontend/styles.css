@@ -302,6 +302,7 @@
     /* Fixed Table Container */
     .table-container {
       flex: 1;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
       min-height: 0;
@@ -316,10 +317,8 @@
       padding-right: 10px;
       padding-left: 10px;
 
-
       border-radius: 8px;
-      max-height: 500px;
-      min-height: 300px;
+      
     }
 
     #resultsBody:empty {
@@ -333,6 +332,8 @@
       margin: 0 !important;
       border-collapse: separate !important;
       border-spacing: 0 !important;
+      max-height: 500px;
+      /* min-height: 100px; */
     }
 
     .table-primary th {
@@ -365,10 +366,20 @@
     }
 
     /* Progress Tracker */
+
+    #progressSection {
+      display: flex;
+      flex-direction: column;
+      height: 500px;
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
     .progress-tracker {
-      max-height: 500px;
       overflow-y: auto;
       padding-right: 10px;
+      max-height: 400px;
+
+
     }
 
     .progress-tracker::-webkit-scrollbar {
