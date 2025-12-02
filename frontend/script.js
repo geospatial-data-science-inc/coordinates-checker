@@ -379,7 +379,7 @@ async function validateCoordinates() {
 
   const country = document.getElementById("countrySelect").value;
   const results = [];
-  const batchSize = 6;
+  const batchSize = 10;
 
   // Show progress section
   document.getElementById("progressSection").style.display = "block";
