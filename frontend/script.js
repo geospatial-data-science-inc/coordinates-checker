@@ -11,6 +11,80 @@ document
       : '<i class="fas fa-bars"></i>';
   });
 
+/* -------------------------------------------
+   TIMER + ETA SYSTEM (ADD THIS BLOCK)
+------------------------------------------- */
+
+// Track per-facility timers
+let facilityTimers = {};
+let startTime = null;
+let totalTimerInterval = null;
+
+// Start a timer for a single facility
+function startFacilityTimer(index) {
+  facilityTimers[index] = {
+    start: Date.now(),
+    interval: setInterval(() => updateFacilityElapsedTime(index), 1000),
+  };
+}
+
+// Stop timer for facility
+function stopFacilityTimer(index) {
+  if (facilityTimers[index]) {
+    clearInterval(facilityTimers[index].interval);
+  }
+}
+
+// Update each facility’s timer display
+function updateFacilityElapsedTime(index) {
+  const timerEl = document.getElementById(`time-${index}`);
+  if (!timerEl || !facilityTimers[index]) return;
+
+  const elapsed = Math.floor((Date.now() - facilityTimers[index].start) / 1000);
+  timerEl.textContent = formatTime(elapsed);
+}
+
+// Update total elapsed + ETA
+function updateTotalElapsedTime() {
+  if (!startTime) return;
+
+  const now = Date.now();
+  const elapsedSec = Math.floor((now - startTime) / 1000);
+
+  // Update total elapsed
+  const totalEl = document.getElementById("totalElapsed");
+  if (totalEl) {
+    totalEl.textContent = formatTime(elapsedSec);
+  }
+
+  // Count completed facilities
+  const completed = document.querySelectorAll(
+    ".facility-progress.complete"
+  ).length;
+
+  const total = uploadedData.length;
+
+  if (completed === 0) {
+    const etaEl = document.getElementById("eta");
+    if (etaEl) etaEl.textContent = "Estimating…";
+    return;
+  }
+
+  // ETA = average time per completed * remaining
+  const avgPerItem = elapsedSec / completed;
+  const remaining = Math.round(avgPerItem * (total - completed));
+
+  const etaEl = document.getElementById("eta");
+  if (etaEl) etaEl.textContent = formatTime(remaining);
+}
+
+function formatTime(sec) {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m ${s}s`;
+}
+
 // Initialize DataTable
 $("#resultsTable thead").addClass("table-primary");
 
@@ -208,6 +282,9 @@ function createProgressCard(facility, index) {
           <span class="facility-name">${facility.Name}</span>
           <span class="facility-status status-processing" id="status-${index}">Processing...</span>
         </div>
+        <div class="facility-timer">
+          <small>⏱ <span id="time-${index}">0s</span></small>
+        </div>
         <div class="api-checks">
           <div class="api-check check-pending" id="check-country-${index}">
             <span>Country</span>
@@ -296,6 +373,10 @@ function isSimilar(a, b) {
 
 // --- Core validation with progress tracking ---
 async function validateCoordinates() {
+  startTime = Date.now();
+  if (totalTimerInterval) clearInterval(totalTimerInterval);
+  totalTimerInterval = setInterval(updateTotalElapsedTime, 1000);
+
   const country = document.getElementById("countrySelect").value;
   const results = [];
   const batchSize = 3;
@@ -312,6 +393,7 @@ async function validateCoordinates() {
   });
 
   async function validateSingleFacility(f, index, total) {
+    startFacilityTimer(index);
     const x = parseFloat(f.x),
       y = parseFloat(f.y);
     updateApiStatus(
@@ -505,6 +587,8 @@ async function validateCoordinates() {
     );
 
     updateFacilityStatus(index, "complete", `Score: ${f.overallScore}%`);
+    stopFacilityTimer(index);
+
     return f;
   }
 
@@ -528,6 +612,11 @@ async function validateCoordinates() {
   updateMap(results);
   updateResultsTable(results);
   updateStatsFromResults(results);
+  // STOP TOTAL TIMER
+  if (totalTimerInterval) {
+    clearInterval(totalTimerInterval);
+    totalTimerInterval = null;
+  }
 }
 
 // function displayValidationResults(results) {
