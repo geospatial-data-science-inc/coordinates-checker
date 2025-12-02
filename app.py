@@ -45,7 +45,7 @@ CORS(app)
 
 # -----------------------------
 # Optimized thread pool with more workers for I/O bound tasks
-executor = ThreadPoolExecutor(max_workers=10)
+executor = ThreadPoolExecutor(max_workers=20)
 
 # -----------------------------
 # 🔥 OPTIMIZED CACHE BUFFER with immediate flushing capability
