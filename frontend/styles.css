@@ -379,7 +379,7 @@
     }
 
     #resultsTable tbody tr:hover {
-      background-color: #f8f9fa;
+      background-color: var(--primary-color);
     }
 
     /* Map Container */

@@ -35,7 +35,7 @@ function stopFacilityTimer(index) {
   }
 }
 
-// Update each facility’s timer display
+// Update each facility's timer display
 function updateFacilityElapsedTime(index) {
   const timerEl = document.getElementById(`time-${index}`);
   if (!timerEl || !facilityTimers[index]) return;
@@ -101,6 +101,20 @@ $(document).ready(function () {
         extend: "csvHtml5",
         text: '<i class="fas fa-file-csv me-1"></i> Export CSV',
         className: "btn btn-outline-primary btn-sm",
+      },
+      {
+        text: '<i class="fas fa-download me-1"></i> Download Dataset',
+        className: "btn btn-info btn-sm",
+        action: function (e, dt, node, config) {
+          downloadOriginalDataset();
+        },
+      },
+      {
+        text: '<i class="fas fa-info-circle me-1"></i> Methodology',
+        className: "btn btn-secondary btn-sm",
+        action: function (e, dt, node, config) {
+          showMethodology();
+        },
       },
     ],
     pageLength: 10,
@@ -214,9 +228,14 @@ function updateStats() {
 
 function updateValidateButton() {
   const country = document.getElementById("countrySelect").value;
-  document.getElementById("validateBtn").disabled = !(
-    country && uploadedData.length > 0
-  );
+  const validateBtn = document.getElementById("validateBtn");
+  validateBtn.disabled = !(country && uploadedData.length > 0);
+
+  // Enable/disable the download button based on uploaded data
+  const downloadBtn = document.querySelector(".btn-info.btn-sm");
+  if (downloadBtn) {
+    downloadBtn.disabled = uploadedData.length === 0;
+  }
 }
 
 function updateDataSummary() {
@@ -608,34 +627,16 @@ async function validateCoordinates() {
     `Validation complete: ${results.length} facilities processed`,
     "success"
   );
-  // displayValidationResults(results);
   updateMap(results);
   updateResultsTable(results);
   updateStatsFromResults(results);
+
   // STOP TOTAL TIMER
   if (totalTimerInterval) {
     clearInterval(totalTimerInterval);
     totalTimerInterval = null;
   }
 }
-
-// function displayValidationResults(results) {
-//   const div = document.getElementById('validationResults');
-//   const valid = results.filter(r => r.overallScore >= 70).length;
-//   const warn = results.filter(r => r.overallScore >= 50 && r.overallScore < 70).length;
-//   const invalid = results.filter(r => r.overallScore < 50).length;
-
-//   div.innerHTML = `
-//     <div class="summary-card">
-//       <div class="d-flex justify-content-between mb-2">
-//         <span class="badge bg-success">Valid: ${valid}</span>
-//         <span class="badge bg-warning">Warning: ${warn}</span>
-//         <span class="badge bg-danger">Invalid: ${invalid}</span>
-//       </div>
-//       <p class="mb-0"><strong>Overall Score:</strong> ${results.length ? Math.round(results.reduce((sum, r) => sum + r.overallScore, 0) / results.length) : 0}%</p>
-//     </div>
-//   `;
-// }
 
 function updateStatsFromResults(results) {
   const valid = results.filter((r) => r.overallScore >= 70).length;
@@ -733,8 +734,8 @@ function updateResultsTable(results) {
       9: `<span class="badge ${
         f.roadDistance.valid ? "bg-success" : "bg-warning"
       }">${
-        f.roadDistance.distance >= 0
-          ? f.roadDistance.distance.toFixed(0) + "m"
+        f.roadDistance.distance !== null && f.roadDistance.distance >= 0
+          ? f.roadDistance?.distance.toFixed(0)
           : "N/A"
       }</span>`,
       10: `<span class="badge ${
@@ -746,7 +747,7 @@ function updateResultsTable(results) {
         f.buildingDistance.distance !== null
           ? f.buildingDistance.distance < 1
             ? "At location"
-            : f.buildingDistance.distance.toFixed(0) + "m"
+            : f.buildingDistance?.distance.toFixed(0)
           : "N/A"
       }</span>`,
       12: `<span class="badge ${
@@ -788,6 +789,260 @@ function updateApiStatus(msg, type = "info") {
   const statusEl = document.getElementById("apiStatus");
   statusEl.textContent = msg;
   statusEl.className = `api-status status-${type}`;
+}
+
+// Download original dataset function
+function downloadOriginalDataset() {
+  if (!uploadedData || uploadedData.length === 0) {
+    alert("No dataset uploaded yet. Please upload a CSV file first.");
+    return;
+  }
+
+  // Get the original column names from the first row
+  const firstRow = uploadedData[0];
+  const columns = Object.keys(firstRow);
+
+  // Convert data to CSV format
+  const csvContent = [
+    columns.join(","), // Header row
+    ...uploadedData.map((row) =>
+      columns
+        .map((col) => {
+          const value = row[col];
+          // Handle values that might contain commas or quotes
+          if (value === null || value === undefined) return "";
+          const stringValue = String(value);
+          if (
+            stringValue.includes(",") ||
+            stringValue.includes('"') ||
+            stringValue.includes("\n")
+          ) {
+            return '"' + stringValue.replace(/"/g, '""') + '"';
+          }
+          return stringValue;
+        })
+        .join(",")
+    ),
+  ].join("\n");
+
+  // Create download link
+  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+
+  // Get filename from original upload or use default
+  const fileInput = document.getElementById("fileUpload");
+  let filename = "uploaded_dataset.csv";
+  if (fileInput.files.length > 0) {
+    filename = fileInput.files[0].name;
+  }
+
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  link.style.visibility = "hidden";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+// Show methodology modal
+function showMethodology() {
+  // Create methodology modal content
+  const methodologyContent = `
+    <div class="modal fade" id="methodologyModal" tabindex="-1" aria-labelledby="methodologyModalLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="methodologyModalLabel">
+              <i class="fas fa-info-circle me-2"></i>Validation Methodology
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="methodology-section">
+              <h6><i class="fas fa-globe-americas me-2"></i>Country Boundary Check</h6>
+              <p>Uses Nominatim reverse geocoding to verify coordinates are within the selected country.</p>
+              <ul>
+                <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
+                <li><strong>Weight:</strong> 30% of total score</li>
+                <li><strong>Validation:</strong> Compares country code from coordinates with selected country</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-map-pin me-2"></i>Administrative Area Match</h6>
+              <p>Compares Admin1 level from uploaded data with OSM administrative boundaries.</p>
+              <ul>
+                <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
+                <li><strong>Weight:</strong> 15% of total score</li>
+                <li><strong>Method:</strong> Fuzzy matching of Admin1 names after normalization</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-copy me-2"></i>Duplicate Check</h6>
+              <p>Identifies coordinates that are very close to each other (within 0.001 degrees).</p>
+              <ul>
+                <li><strong>Threshold:</strong> 0.001 degrees (~111 meters)</li>
+                <li><strong>Weight:</strong> 20% of total score</li>
+                <li><strong>Purpose:</strong> Prevents duplicate facility entries</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-road me-2"></i>Road Distance</h6>
+              <p>Calculates distance to nearest road using Overture Maps transportation data with Overpass API fallback.</p>
+              <ul>
+                <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
+                <li><strong>Fallback:</strong> Overpass API for road networks</li>
+                <li><strong>Weight:</strong> 10% of total score</li>
+                <li><strong>Optimal:</strong> Distance ≤ 100 meters</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-building me-2"></i>Building Distance</h6>
+              <p>Finds distance to nearest building using Overture Maps building data with Overpass API fallback.</p>
+              <ul>
+                <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
+                <li><strong>Fallback:</strong> Overpass API for building data</li>
+                <li><strong>Weight:</strong> 10% of total score</li>
+                <li><strong>Optimal:</strong> Distance ≤ 50 meters</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-water me-2"></i>Water Body Check</h6>
+              <p>Checks if coordinates fall on water bodies (rivers, lakes, oceans).</p>
+              <ul>
+                <li><strong>Source:</strong> Overpass API water features query</li>
+                <li><strong>Radius:</strong> 50 meters search radius</li>
+                <li><strong>Weight:</strong> 30% of total score</li>
+                <li><strong>Validation:</strong> Points should not be on water bodies</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-users me-2"></i>Population Density</h6>
+              <p>Estimates population within ~1km radius using WorldPop dataset.</p>
+              <ul>
+                <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
+                <li><strong>Resolution:</strong> 100m × 100m grid</li>
+                <li><strong>Validation:</strong> Minimum 100 people within ~1km radius</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-calculator me-2"></i>Scoring System</h6>
+              <p>Overall score is calculated as weighted sum of all checks:</p>
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Check</th>
+                    <th>Weight</th>
+                    <th>Passing Criteria</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Country Boundary</td>
+                    <td>30%</td>
+                    <td>Correct country code</td>
+                  </tr>
+                  <tr>
+                    <td>Admin Area Match</td>
+                    <td>15%</td>
+                    <td>Admin1 name matches (fuzzy)</td>
+                  </tr>
+                  <tr>
+                    <td>Duplicate Check</td>
+                    <td>20%</td>
+                    <td>No nearby duplicates</td>
+                  </tr>
+                  <tr>
+                    <td>Road Distance</td>
+                    <td>10%</td>
+                    <td>Road within 500m</td>
+                  </tr>
+                  <tr>
+                    <td>Building Distance</td>
+                    <td>10%</td>
+                    <td>Building within 200m</td>
+                  </tr>
+                  <tr>
+                    <td>Water Check</td>
+                    <td>30%</td>
+                    <td>Not on water body</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p class="mt-2">
+                <strong>Score Interpretation:</strong><br>
+                • <span class="text-success">≥ 70%</span>: Valid<br>
+                • <span class="text-warning">50-69%</span>: Needs Review<br>
+                • <span class="text-danger">&lt; 50%</span>: Invalid
+              </p>
+            </div>
+            
+            <div class="alert alert-info mt-3">
+              <i class="fas fa-lightbulb me-2"></i>
+              <strong>Note:</strong> All API calls are cached for performance. Processing time depends on number of facilities and API availability.
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Add modal to DOM if not already present
+  let modal = document.getElementById("methodologyModal");
+  if (!modal) {
+    document.body.insertAdjacentHTML("beforeend", methodologyContent);
+    modal = document.getElementById("methodologyModal");
+  }
+
+  // Show the modal
+  const bootstrapModal = new bootstrap.Modal(modal);
+  bootstrapModal.show();
+}
+
+// Add CSS for methodology modal styling
+const methodologyCSS = `
+.methodology-section {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #eee;
+}
+
+.methodology-section:last-child {
+  border-bottom: none;
+}
+
+.methodology-section h6 {
+  color: #2c3e50;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.methodology-section ul {
+  margin-bottom: 0.5rem;
+  padding-left: 1.5rem;
+}
+
+.methodology-section li {
+  margin-bottom: 0.25rem;
+}
+`;
+
+// Inject CSS
+if (!document.getElementById("methodology-css")) {
+  const style = document.createElement("style");
+  style.id = "methodology-css";
+  style.textContent = methodologyCSS;
+  document.head.appendChild(style);
 }
 
 // Close mobile sidebar when clicking outside on mobile
