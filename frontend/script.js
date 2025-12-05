@@ -390,6 +390,31 @@ function isSimilar(a, b) {
   return a === b || a.startsWith(b) || b.startsWith(a);
 }
 
+// Function to determine facility category
+function determineFacilityCategory(f) {
+  // Check for immediate fails (Invalid)
+  if (!f.countryBoundary?.valid || f.waterCheck?.on_water) {
+    return "Invalid";
+  }
+
+  // Check for Data Consistency Review
+  if (!f.duplicateCheck?.valid || !f.adminAreaMatch?.valid) {
+    return "Data Consistency Review";
+  }
+
+  // Check for Location Accuracy Flags
+  if (
+    !f.roadDistance?.valid ||
+    !f.buildingDistance?.valid ||
+    !f.populationDensity?.valid
+  ) {
+    return "Location Accuracy Flags";
+  }
+
+  // If all checks pass
+  return "Valid";
+}
+
 // --- Core validation with progress tracking ---
 async function validateCoordinates() {
   startTime = Date.now();
@@ -420,214 +445,282 @@ async function validateCoordinates() {
       "info"
     );
 
-    // Country check
-    updateCheckStatus(index, "country", "loading");
     try {
-      const countryResp = await fetch(
-        `${API_CONFIG.nominatim}?lat=${y}&lon=${x}&format=json&addressdetails=1`
+      // Country check
+      updateCheckStatus(index, "country", "loading");
+      try {
+        const countryResp = await fetch(
+          `${API_CONFIG.nominatim}?lat=${y}&lon=${x}&format=json&addressdetails=1`
+        );
+        countryData = await countryResp.json();
+        const expectedCountry = countryAlpha2Map[country];
+        f.countryBoundary = {
+          valid: countryData.address?.country_code === expectedCountry,
+          message: countryData.address?.country || "Unknown",
+          countryCode: countryData.address?.country_code || "",
+          countryName: countryData.address?.country || "",
+        };
+        updateCheckStatus(
+          index,
+          "country",
+          f.countryBoundary.valid ? "success" : "failed"
+        );
+      } catch (e) {
+        f.countryBoundary = {
+          valid: false,
+          message: "Country check failed",
+          countryCode: "",
+          countryName: "",
+        };
+        updateCheckStatus(index, "country", "failed");
+      }
+
+      // Update the Admin1 check section in the validateSingleFacility function:
+
+      // --- Admin1 check ---
+      updateCheckStatus(index, "admin", "loading");
+      try {
+        // Extract admin1 name from Nominatim response - handle different field names
+        const address = countryData?.address || {};
+
+        // Try different possible field names for Admin1 level
+        const osmAdmin1 =
+          address?.region || // Alternative
+          address?.state || // Most common
+          address?.province || // Some countries use province
+          address?.department || // Some countries use department
+          address?.county || // Some countries use county
+          address["ISO3166-2-lvl3"]?.split("-")[1] || // ISO code
+          address["ISO3166-2-lvl4"]?.split("-")[1] || // Alternative ISO code
+          "";
+
+        const osmAdmin1Normalized = normalize(osmAdmin1);
+        const admin1 = normalize(f.Admin1 || "");
+        const admin1Match = isSimilar(admin1, osmAdmin1Normalized);
+        const msg = admin1Match ? "Admin1 matches" : "Admin1 mismatch";
+
+        f.adminAreaMatch = {
+          valid: admin1Match,
+          message: msg,
+          osmAdminName: osmAdmin1, // Store the actual name from server
+          uploadedAdminName: f.Admin1 || "", // Store the uploaded name
+          matchStatus: admin1Match ? "match" : "mismatch",
+          addressFields: address, // Store all address fields for debugging
+        };
+
+        updateCheckStatus(index, "admin", admin1Match ? "success" : "failed");
+      } catch (e) {
+        console.error("Admin1 check failed", e);
+        f.adminAreaMatch = {
+          valid: false,
+          message: "Admin1 check failed",
+          osmAdminName: "",
+          uploadedAdminName: f.Admin1 || "",
+          matchStatus: "error",
+        };
+        updateCheckStatus(index, "admin", "failed");
+      }
+
+      // Duplicate check (instant, no API)
+      const threshold = 0.001;
+      const duplicates = uploadedData.filter(
+        (o, i) =>
+          i !== index &&
+          Math.abs(parseFloat(o.x) - x) < threshold &&
+          Math.abs(parseFloat(o.y) - y) < threshold
       );
-      countryData = await countryResp.json();
-      const expectedCountry = countryAlpha2Map[country];
-      f.countryBoundary = {
-        valid: countryData.address?.country_code === expectedCountry,
-        message: countryData.address?.country || "Unknown",
+      f.duplicateCheck = {
+        valid: duplicates.length === 0,
+        message:
+          duplicates.length === 0
+            ? "No duplicates"
+            : `${duplicates.length} duplicates`,
+        duplicateCount: duplicates.length,
       };
-      updateCheckStatus(
-        index,
-        "country",
-        f.countryBoundary.valid ? "success" : "failed"
-      );
-    } catch (e) {
-      f.countryBoundary = { valid: false, message: "Country check failed" };
-      updateCheckStatus(index, "country", "failed");
+
+      // Road distance
+      updateCheckStatus(index, "road", "loading");
+      try {
+        const roadResp = await fetch(
+          `${API_CONFIG.road_distance}?lat=${y}&lon=${x}`
+        );
+        const roadData = await roadResp.json();
+        console.log("road", roadData);
+        f.roadDistance = {
+          valid: roadData.valid || false,
+          distance: roadData.distance !== undefined ? roadData.distance : null,
+          message: roadData.message || "No road nearby",
+        };
+        updateCheckStatus(index, "road", roadData.valid ? "success" : "failed");
+      } catch (e) {
+        f.roadDistance = {
+          valid: false,
+          distance: null,
+          message: "Road distance failed",
+        };
+        updateCheckStatus(index, "road", "failed");
+      }
+
+      // Building distance
+      updateCheckStatus(index, "building", "loading");
+      try {
+        const buildResp = await fetch(
+          `${API_CONFIG.building_distance}?lat=${y}&lon=${x}`
+        );
+        const buildData = await buildResp.json();
+        f.buildingDistance = {
+          valid: buildData.valid || false,
+          distance:
+            buildData.distance !== undefined ? buildData.distance : null,
+          message: buildData.message || "No building nearby",
+        };
+        updateCheckStatus(
+          index,
+          "building",
+          buildData.valid ? "success" : "failed"
+        );
+      } catch (e) {
+        f.buildingDistance = {
+          valid: false,
+          distance: null,
+          message: "Building distance failed",
+        };
+        updateCheckStatus(index, "building", "failed");
+      }
+
+      // Water check - FIXED: Store both valid and on_water properties
+      updateCheckStatus(index, "water", "loading");
+      try {
+        const waterResp = await fetch(
+          `${API_CONFIG.water_check}?lat=${y}&lon=${x}`
+        );
+        const waterData = await waterResp.json();
+        const onWater = waterData.on_water || false;
+        f.waterCheck = {
+          on_water: onWater,
+          message: onWater ? "On water body" : "Not on water",
+        };
+        updateCheckStatus(index, "water", !onWater ? "success" : "failed");
+      } catch (e) {
+        f.waterCheck = {
+          on_water: false,
+          message: "Water check failed",
+        };
+        updateCheckStatus(index, "water", "failed");
+      }
+
+      // Population check
+      updateCheckStatus(index, "population", "loading");
+      try {
+        const popResp = await fetch(
+          `${API_CONFIG.worldpop}?latitude=${y}&longitude=${x}`
+        );
+        const popData = await popResp.json();
+        const population = popData.population || 0;
+
+        f.populationDensity = {
+          valid: population > 100,
+          population,
+          message: `Population ~1km: ${population}`,
+        };
+
+        updateCheckStatus(
+          index,
+          "population",
+          f.populationDensity.valid ? "success" : "failed"
+        );
+      } catch (e) {
+        f.populationDensity = {
+          valid: false,
+          population: 0,
+          message: "Population check failed",
+        };
+        updateCheckStatus(index, "population", "failed");
+      }
+
+      // Determine category instead of score
+      f.category = determineFacilityCategory(f);
+
+      // Set status message based on category
+      let statusMessage = "";
+      switch (f.category) {
+        case "Invalid":
+          statusMessage = "Invalid (Country/Water issue)";
+          break;
+        case "Data Consistency Review":
+          statusMessage = "Data Consistency Review";
+          break;
+        case "Location Accuracy Flags":
+          statusMessage = "Location Accuracy Flags";
+          break;
+        case "Valid":
+          statusMessage = "Valid";
+          break;
+        default:
+          statusMessage = f.category;
+      }
+
+      updateFacilityStatus(index, "complete", statusMessage);
+      stopFacilityTimer(index);
+      return f;
+    } catch (error) {
+      console.error(`Error validating facility ${index}:`, error);
+      updateFacilityStatus(index, "error", "Validation failed");
+      stopFacilityTimer(index);
+
+      // Return facility with error flag
+      f.error = true;
+      f.category = "Error";
+      return f;
     }
-
-    // --- Admin1 check ---
-    updateCheckStatus(index, "admin", "loading");
-    try {
-      const osmAdmin1 = normalize(countryData.address?.state || "");
-      const admin1 = normalize(f.Admin1);
-      const admin1Match = isSimilar(admin1, osmAdmin1);
-      const score = admin1Match ? 100 : 0;
-      const msg = admin1Match ? "Admin1 matches" : "Admin1 mismatch";
-
-      f.adminAreaMatch = {
-        valid: admin1Match,
-        score,
-        message: msg,
-      };
-
-      updateCheckStatus(index, "admin", admin1Match ? "success" : "failed");
-    } catch (e) {
-      console.error("Admin1 check failed", e);
-      f.adminAreaMatch = {
-        valid: false,
-        score: 0,
-        message: "Admin1 check failed",
-      };
-      updateCheckStatus(index, "admin", "failed");
-    }
-
-    // Duplicate check (instant, no API)
-    const threshold = 0.001;
-    const duplicates = uploadedData.filter(
-      (o) =>
-        o !== f &&
-        Math.abs(parseFloat(o.x) - x) < threshold &&
-        Math.abs(parseFloat(o.y) - y) < threshold
-    );
-    f.duplicateCheck = {
-      valid: duplicates.length === 0,
-      message:
-        duplicates.length === 0
-          ? "No duplicates"
-          : `${duplicates.length} duplicates`,
-    };
-
-    // Road distance
-    updateCheckStatus(index, "road", "loading");
-    try {
-      const roadResp = await fetch(
-        `${API_CONFIG.road_distance}?lat=${y}&lon=${x}`
-      );
-      const roadData = await roadResp.json();
-      f.roadDistance = roadData.valid
-        ? {
-            valid: true,
-            distance: roadData.distance,
-            message: roadData.message,
-          }
-        : {
-            valid: false,
-            distance: null,
-            message: roadData.message || "No road nearby",
-          };
-      updateCheckStatus(index, "road", roadData.valid ? "success" : "failed");
-    } catch (e) {
-      f.roadDistance = {
-        valid: false,
-        distance: null,
-        message: "Road distance failed",
-      };
-      updateCheckStatus(index, "road", "failed");
-    }
-
-    // Building distance
-    updateCheckStatus(index, "building", "loading");
-    try {
-      const buildResp = await fetch(
-        `${API_CONFIG.building_distance}?lat=${y}&lon=${x}`
-      );
-      const buildData = await buildResp.json();
-      f.buildingDistance = buildData.valid
-        ? {
-            valid: true,
-            distance: buildData.distance,
-            message: buildData.message,
-          }
-        : {
-            valid: false,
-            distance: null,
-            message: buildData.message || "No building nearby",
-          };
-      updateCheckStatus(
-        index,
-        "building",
-        buildData.valid ? "success" : "failed"
-      );
-    } catch (e) {
-      f.buildingDistance = {
-        valid: false,
-        distance: null,
-        message: "Building distance failed",
-      };
-      updateCheckStatus(index, "building", "failed");
-    }
-
-    // Water check
-    updateCheckStatus(index, "water", "loading");
-    try {
-      const waterResp = await fetch(
-        `${API_CONFIG.water_check}?lat=${y}&lon=${x}`
-      );
-      const waterData = await waterResp.json();
-      f.waterCheck = { valid: waterData.on_water };
-      updateCheckStatus(
-        index,
-        "water",
-        waterData.on_water ? "failed" : "success"
-      );
-    } catch (e) {
-      f.waterCheck = {
-        valid: false,
-        distance: null,
-        message: "Water check failed",
-      };
-      updateCheckStatus(index, "water", "failed");
-    }
-
-    // Population check
-    updateCheckStatus(index, "population", "loading");
-    try {
-      const popResp = await fetch(
-        `${API_CONFIG.worldpop}?latitude=${y}&longitude=${x}`
-      );
-      const popData = await popResp.json();
-      const population = popData.population || 0;
-
-      f.populationDensity = {
-        valid: population > 100,
-        population,
-        message: `Population ~1km: ${population}`,
-      };
-
-      updateCheckStatus(
-        index,
-        "population",
-        f.populationDensity.valid ? "success" : "failed"
-      );
-    } catch (e) {
-      f.populationDensity = {
-        valid: false,
-        population: 0,
-        message: "Population check failed",
-      };
-      updateCheckStatus(index, "population", "failed");
-    }
-
-    // Calculate overall score
-    f.overallScore = Math.round(
-      (f.countryBoundary.valid ? 1 : 0) * 30 +
-        f.adminAreaMatch.score * 0.15 +
-        (f.duplicateCheck.valid ? 1 : 0) * 20 +
-        (f.roadDistance.valid ? 1 : 0) * 10 +
-        (f.buildingDistance.valid ? 1 : 0) * 10 +
-        (!f.waterCheck.on_water ? 1 : 0) * 30
-    );
-
-    updateFacilityStatus(index, "complete", `Score: ${f.overallScore}%`);
-    stopFacilityTimer(index);
-
-    return f;
   }
 
-  // Process facilities in batches
+  // Process facilities in batches with error handling
   for (let i = 0; i < uploadedData.length; i += batchSize) {
     const batch = uploadedData.slice(i, i + batchSize);
-    const batchResults = await Promise.all(
-      batch.map((f, idx) =>
+
+    try {
+      // Use Promise.allSettled instead of Promise.all for better error handling
+      const batchPromises = batch.map((f, idx) =>
         validateSingleFacility(f, i + idx, uploadedData.length)
-      )
-    );
-    results.push(...batchResults);
-    updateOverallProgress(results.length, uploadedData.length);
+      );
+
+      const batchResults = await Promise.allSettled(batchPromises);
+
+      // Process both successful and failed promises
+      batchResults.forEach((result, idx) => {
+        if (result.status === "fulfilled") {
+          results.push(result.value);
+        } else {
+          // Handle failed promise
+          console.error(`Facility ${i + idx} failed:`, result.reason);
+          const failedFacility = batch[idx];
+          failedFacility.error = true;
+          failedFacility.category = "Error";
+          results.push(failedFacility);
+        }
+      });
+
+      updateOverallProgress(results.length, uploadedData.length);
+    } catch (batchError) {
+      console.error("Batch processing error:", batchError);
+      // Even if batch fails, mark all facilities in batch as errors
+      batch.forEach((f, idx) => {
+        f.error = true;
+        f.category = "Error";
+        results.push(f);
+      });
+      updateOverallProgress(results.length, uploadedData.length);
+    }
   }
 
   updateApiStatus(
     `Validation complete: ${results.length} facilities processed`,
     "success"
   );
-  updateMap(results);
+
+  // Update UI with results
+  updateMap(results.filter((f) => !f.error)); // Only show non-error facilities on map
   updateResultsTable(results);
   updateStatsFromResults(results);
 
@@ -639,15 +732,22 @@ async function validateCoordinates() {
 }
 
 function updateStatsFromResults(results) {
-  const valid = results.filter((r) => r.overallScore >= 70).length;
-  const warn = results.filter(
-    (r) => r.overallScore >= 50 && r.overallScore < 70
+  // Count by category
+  const validCount = results.filter((r) => r.category === "Valid").length;
+  const dataConsistencyCount = results.filter(
+    (r) => r.category === "Data Consistency Review"
   ).length;
-  const invalid = results.filter((r) => r.overallScore < 50).length;
+  const locationAccuracyCount = results.filter(
+    (r) => r.category === "Location Accuracy Flags"
+  ).length;
+  const invalidCount = results.filter((r) => r.category === "Invalid").length;
+  const errorCount = results.filter((r) => r.category === "Error").length;
 
-  document.getElementById("validCount").textContent = valid;
-  document.getElementById("warningCount").textContent = warn;
-  document.getElementById("invalidCount").textContent = invalid;
+  document.getElementById("validCount").textContent = validCount;
+  document.getElementById("warningCount").textContent =
+    dataConsistencyCount + locationAccuracyCount;
+  document.getElementById("invalidCount").textContent =
+    invalidCount + errorCount;
   document.getElementById("totalCount").textContent = results.length;
 }
 
@@ -658,12 +758,27 @@ function updateMap(results) {
   markers = {};
 
   results.forEach((f, i) => {
-    const color =
-      f.overallScore >= 70
-        ? "#4cc9f0"
-        : f.overallScore >= 50
-        ? "#f72585"
-        : "#ff0054";
+    if (f.error) return; // Skip error facilities on map
+
+    // Determine color based on category
+    let color = "";
+    switch (f.category) {
+      case "Valid":
+        color = "#198754";
+        break;
+      case "Data Consistency Review":
+        color = "#ffa500";
+        break;
+      case "Location Accuracy Flags":
+        color = "#ffa500";
+        break;
+      case "Invalid":
+        color = "#ff0054";
+        break;
+      default:
+        color = "#808080"; // Gray for unknown
+    }
+
     const m = L.marker([parseFloat(f.y), parseFloat(f.x)], {
       icon: L.divIcon({
         className: "custom-marker",
@@ -674,22 +789,44 @@ function updateMap(results) {
     }).addTo(map);
 
     m.bindPopup(`
-          <div style="min-width: 200px;">
+          <div style="min-width: 250px;">
             <h6 style="margin: 0 0 10px 0; color: ${color}"><strong>${
       f.Name
     }</strong></h6>
             <p style="margin: 0 0 5px 0;"><strong>Coordinates:</strong> ${
               f.x
             }, ${f.y}</p>
-            <p style="margin: 0 0 5px 0;"><strong>Score:</strong> ${
-              f.overallScore
-            }%</p>
-            <p style="margin: 0 0 5px 0;"><strong>Country Match:</strong> ${
-              f.countryBoundary.valid ? "✓" : "✗"
+            <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${
+              f.category
             }</p>
+            <p style="margin: 0 0 5px 0;"><strong>Country Match:</strong> ${
+              f.countryBoundary?.valid ? "✓" : "✗"
+            } (${f.countryBoundary?.countryName || "Unknown"})</p>
             <p style="margin: 0 0 5px 0;"><strong>On Water:</strong> ${
               f.waterCheck?.on_water ? "Yes" : "No"
             }</p>
+            <p style="margin: 0 0 5px 0;"><strong>Duplicate:</strong> ${
+              f.duplicateCheck?.valid ? "No" : "Yes"
+            }</p>
+            <p style="margin: 0 0 5px 0;"><strong>Road Distance:</strong> ${
+              f.roadDistance?.distance !== null
+                ? f.roadDistance?.distance.toFixed(2)
+                : "N/A"
+            }</p>
+            <p style="margin: 0 0 5px 0;"><strong>Building Distance:</strong> ${
+              f.buildingDistance?.distance !== null
+                ? f.buildingDistance?.distance.toFixed(2) < 1
+                  ? "At location"
+                  : f.buildingDistance?.distance.toFixed(2)
+                : "N/A"
+            }</p>
+            <p style="margin: 0 0 5px 0;">
+              <strong>Admin Match:</strong> ${
+                f.adminAreaMatch?.valid ? "✓" : "✗"
+              }<br>
+              <small>Uploaded: ${f.Admin1 || "N/A"}</small><br>
+              <small>OSM: ${f.adminAreaMatch?.osmAdminName || "N/A"}</small>
+            </p>
           </div>
         `);
 
@@ -697,73 +834,110 @@ function updateMap(results) {
   });
 
   // Fit map to show all markers if there are any
-  if (results.length > 0) {
-    const markerGroup = new L.featureGroup(Object.values(markers));
+  const validMarkers = Object.values(markers);
+  if (validMarkers.length > 0) {
+    const markerGroup = new L.featureGroup(validMarkers);
     map.fitBounds(markerGroup.getBounds().pad(0.1));
   }
 }
 
 function updateResultsTable(results) {
   // Map results to DataTables-compatible array
-  const data = results.map((f) => {
-    // Determine row class based on overallScore
-    const rowClass =
-      f.overallScore >= 70
-        ? "table-success"
-        : f.overallScore >= 50
-        ? "table-warning"
-        : "table-danger";
+  const data = results.map((f, index) => {
+    // Determine row class based on category
+    let rowClass = "";
+    switch (f.category) {
+      case "Valid":
+        rowClass = "table-success";
+        break;
+      case "Data Consistency Review":
+        rowClass = "table-warning";
+        break;
+      case "Location Accuracy Flags":
+        rowClass = "table-warning";
+        break;
+      case "Invalid":
+        rowClass = "table-danger";
+        break;
+      case "Error":
+        rowClass = "table-secondary";
+        break;
+      default:
+        rowClass = "";
+    }
 
     return {
-      DT_RowClass: rowClass, // DataTables will apply this class to the row
-      0: f.Name,
+      DT_RowClass: rowClass,
+      0: f.Name || "Unknown",
       1: f.x || "",
       2: f.y || "",
       3: f.Admin1 || "",
       4: f.Admin2 || "",
       5: f.Admin3 || "",
-      6: `<span class="badge ${
-        f.countryBoundary.valid ? "bg-success" : "bg-danger"
-      }">${f.countryBoundary.valid ? "✓" : "✗"}</span>`,
-      7: `<span class="badge ${
-        f.adminAreaMatch.valid ? "bg-success" : "bg-warning"
-      }">${f.adminAreaMatch.valid ? "✓" : "!"}</span>`,
-      8: `<span class="badge ${
-        f.duplicateCheck.valid ? "bg-success" : "bg-danger"
-      }">${f.duplicateCheck.valid ? "✓" : "✗"}</span>`,
-      9: `<span class="badge ${
-        f.roadDistance.valid ? "bg-success" : "bg-warning"
-      }">${
-        f.roadDistance.distance !== null && f.roadDistance.distance >= 0
-          ? f.roadDistance?.distance.toFixed(0)
-          : "N/A"
-      }</span>`,
-      10: `<span class="badge ${
-        !f.waterCheck?.on_water ? "bg-success" : "bg-warning"
-      }">${!f.waterCheck?.on_water ? "✓" : "✗"}</span>`,
-      11: `<span class="badge ${
-        f.buildingDistance.valid ? "bg-success" : "bg-warning"
-      }">${
-        f.buildingDistance.distance !== null
-          ? f.buildingDistance.distance < 1
-            ? "At location"
-            : f.buildingDistance?.distance.toFixed(0)
-          : "N/A"
-      }</span>`,
-      12: `<span class="badge ${
-        f.populationDensity.valid ? "bg-success" : "bg-warning"
-      }">${
-        f.populationDensity.population
-          ? f.populationDensity.population.toLocaleString()
-          : "N/A"
-      }</span>`,
-      13: `<span class="badge ${
-        f.overallScore >= 70
-          ? "bg-success"
-          : f.overallScore >= 50
-          ? "bg-warning"
-          : "bg-danger"
-      }">${f.overallScore}%</span>`,
+      6: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            f.countryBoundary?.valid ? "bg-success" : "bg-danger"
+          }">${f.countryBoundary?.valid ? "Pass" : "Fail"}</span>`,
+      7: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<div class="admin-comparison">
+             <div><small><strong>Uploaded:</strong> ${
+               f.Admin1 || "N/A"
+             }</small></div>
+             <div><small><strong>OSM:</strong> ${
+               f.adminAreaMatch?.osmAdminName || "N/A"
+             }</small></div>
+             <div><span class="badge ${
+               f.adminAreaMatch?.valid ? "bg-success" : "bg-warning"
+             }">${f.adminAreaMatch?.valid ? "Pass" : "Fail"}</span></div>
+           </div>`,
+      8: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            f.duplicateCheck?.valid ? "bg-success" : "bg-warning"
+          }">${f.duplicateCheck?.valid ? "Pass" : "Fail"}</span>`,
+      9: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            f.roadDistance?.valid ? "bg-success" : "bg-warning"
+          }">${
+            f.roadDistance?.distance !== null
+              ? f.roadDistance?.distance.toFixed(2)
+              : "N/A"
+          }</span>`,
+      10: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            !f.waterCheck?.on_water ? "bg-success" : "bg-danger"
+          }">${!f.waterCheck?.on_water ? "Pass" : "Fail"}</span>`,
+      11: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            f.buildingDistance?.valid ? "bg-success" : "bg-warning"
+          }">${
+            f.buildingDistance?.distance !== undefined
+              ? f.buildingDistance?.distance.toFixed(2)
+              : "N/A"
+          }</span>`,
+      12: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            f.populationDensity?.valid ? "bg-success" : "bg-warning"
+          }">${
+            f.populationDensity?.population
+              ? f.populationDensity.population.toLocaleString()
+              : "N/A"
+          }</span>`,
+      13: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<span class="badge ${
+            f.category === "Valid"
+              ? "bg-success"
+              : f.category === "Invalid"
+              ? "bg-danger"
+              : "bg-warning"
+          }">${f.category}</span>`,
     };
   });
 
@@ -845,7 +1019,7 @@ function downloadOriginalDataset() {
   document.body.removeChild(link);
 }
 
-// Show methodology modal
+// Show methodology modal with updated categorical system
 function showMethodology() {
   // Create methodology modal content
   const methodologyContent = `
@@ -864,8 +1038,19 @@ function showMethodology() {
               <p>Uses Nominatim reverse geocoding to verify coordinates are within the selected country.</p>
               <ul>
                 <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
-                <li><strong>Weight:</strong> 30% of total score</li>
+                <li><strong>Impact:</strong> Immediate fail if incorrect</li>
                 <li><strong>Validation:</strong> Compares country code from coordinates with selected country</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-water me-2"></i>Water Body Check</h6>
+              <p>Checks if coordinates fall on water bodies (rivers, lakes, oceans).</p>
+              <ul>
+                <li><strong>Source:</strong> Overpass API water features query</li>
+                <li><strong>Radius:</strong> 50 meters search radius</li>
+                <li><strong>Impact:</strong> Immediate fail if on water</li>
+                <li><strong>Validation:</strong> Points should not be on water bodies</li>
               </ul>
             </div>
             
@@ -874,8 +1059,9 @@ function showMethodology() {
               <p>Compares Admin1 level from uploaded data with OSM administrative boundaries.</p>
               <ul>
                 <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
-                <li><strong>Weight:</strong> 15% of total score</li>
+                <li><strong>Impact:</strong> Data Consistency Review if mismatch</li>
                 <li><strong>Method:</strong> Fuzzy matching of Admin1 names after normalization</li>
+                <li><strong>Display:</strong> Shows both uploaded name and OSM name for comparison</li>
               </ul>
             </div>
             
@@ -884,7 +1070,7 @@ function showMethodology() {
               <p>Identifies coordinates that are very close to each other (within 0.001 degrees).</p>
               <ul>
                 <li><strong>Threshold:</strong> 0.001 degrees (~111 meters)</li>
-                <li><strong>Weight:</strong> 20% of total score</li>
+                <li><strong>Impact:</strong> Data Consistency Review if duplicates found</li>
                 <li><strong>Purpose:</strong> Prevents duplicate facility entries</li>
               </ul>
             </div>
@@ -895,7 +1081,7 @@ function showMethodology() {
               <ul>
                 <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
                 <li><strong>Fallback:</strong> Overpass API for road networks</li>
-                <li><strong>Weight:</strong> 10% of total score</li>
+                <li><strong>Impact:</strong> Location Accuracy Flags if no road within 500m</li>
                 <li><strong>Optimal:</strong> Distance ≤ 100 meters</li>
               </ul>
             </div>
@@ -906,19 +1092,8 @@ function showMethodology() {
               <ul>
                 <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
                 <li><strong>Fallback:</strong> Overpass API for building data</li>
-                <li><strong>Weight:</strong> 10% of total score</li>
+                <li><strong>Impact:</strong> Location Accuracy Flags if no building within 200m</li>
                 <li><strong>Optimal:</strong> Distance ≤ 50 meters</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-water me-2"></i>Water Body Check</h6>
-              <p>Checks if coordinates fall on water bodies (rivers, lakes, oceans).</p>
-              <ul>
-                <li><strong>Source:</strong> Overpass API water features query</li>
-                <li><strong>Radius:</strong> 50 meters search radius</li>
-                <li><strong>Weight:</strong> 30% of total score</li>
-                <li><strong>Validation:</strong> Points should not be on water bodies</li>
               </ul>
             </div>
             
@@ -928,59 +1103,51 @@ function showMethodology() {
               <ul>
                 <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
                 <li><strong>Resolution:</strong> 100m × 100m grid</li>
+                <li><strong>Impact:</strong> Location Accuracy Flags if population ≤ 100</li>
                 <li><strong>Validation:</strong> Minimum 100 people within ~1km radius</li>
               </ul>
             </div>
             
             <div class="methodology-section">
-              <h6><i class="fas fa-calculator me-2"></i>Scoring System</h6>
-              <p>Overall score is calculated as weighted sum of all checks:</p>
+              <h6><i class="fas fa-list-check me-2"></i>Categorical Validation System</h6>
+              <p>Facilities are categorized based on validation results:</p>
               <table class="table table-sm">
                 <thead>
                   <tr>
-                    <th>Check</th>
-                    <th>Weight</th>
-                    <th>Passing Criteria</th>
+                    <th>Category</th>
+                    <th>Conditions</th>
+                    <th>Action Required</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td>Country Boundary</td>
-                    <td>30%</td>
-                    <td>Correct country code</td>
+                  <tr class="table-danger">
+                    <td><strong>Invalid</strong></td>
+                    <td>Wrong country OR on water body</td>
+                    <td>Immediate correction needed</td>
                   </tr>
-                  <tr>
-                    <td>Admin Area Match</td>
-                    <td>15%</td>
-                    <td>Admin1 name matches (fuzzy)</td>
+                  <tr class="table-warning">
+                    <td><strong>Data Consistency Review</strong></td>
+                    <td>Duplicate coordinates OR Admin1 mismatch</td>
+                    <td>Review data consistency and administrative boundaries</td>
                   </tr>
-                  <tr>
-                    <td>Duplicate Check</td>
-                    <td>20%</td>
-                    <td>No nearby duplicates</td>
+                  <tr class="table-warning">
+                    <td><strong>Location Accuracy Flags</strong></td>
+                    <td>No road nearby OR No building nearby OR Low population</td>
+                    <td>Verify coordinate accuracy and physical plausibility</td>
                   </tr>
-                  <tr>
-                    <td>Road Distance</td>
-                    <td>10%</td>
-                    <td>Road within 500m</td>
-                  </tr>
-                  <tr>
-                    <td>Building Distance</td>
-                    <td>10%</td>
-                    <td>Building within 200m</td>
-                  </tr>
-                  <tr>
-                    <td>Water Check</td>
-                    <td>30%</td>
-                    <td>Not on water body</td>
+                  <tr class="table-success">
+                    <td><strong>Valid</strong></td>
+                    <td>All checks pass</td>
+                    <td>No action required</td>
                   </tr>
                 </tbody>
               </table>
               <p class="mt-2">
-                <strong>Score Interpretation:</strong><br>
-                • <span class="text-success">≥ 70%</span>: Valid<br>
-                • <span class="text-warning">50-69%</span>: Needs Review<br>
-                • <span class="text-danger">&lt; 50%</span>: Invalid
+                <strong>Category Interpretation:</strong><br>
+                • <span class="text-success">Valid</span>: All checks pass - coordinates are reliable<br>
+                • <span class="text-warning">Data Consistency Review</span>: Potential data entry or administrative issues<br>
+                • <span class="text-warning">Location Accuracy Flags</span>: Physical location may be inaccurate<br>
+                • <span class="text-danger">Invalid</span>: Fundamental errors requiring immediate correction
               </p>
             </div>
             
@@ -1009,7 +1176,7 @@ function showMethodology() {
   bootstrapModal.show();
 }
 
-// Add CSS for methodology modal styling
+// Add CSS for methodology modal styling and admin comparison
 const methodologyCSS = `
 .methodology-section {
   margin-bottom: 1.5rem;
@@ -1034,6 +1201,19 @@ const methodologyCSS = `
 
 .methodology-section li {
   margin-bottom: 0.25rem;
+}
+
+.admin-comparison {
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.admin-comparison div {
+  margin-bottom: 2px;
+}
+
+.admin-comparison small {
+  display: block;
 }
 `;
 
