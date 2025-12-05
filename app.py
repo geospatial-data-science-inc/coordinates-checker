@@ -78,50 +78,89 @@ def flush_cache_buffer(force=False):
 atexit.register(lambda: flush_cache_buffer(force=True))
 
 # -----------------------------
-# REDIS CACHE LAYER (if enabled)
-def get_cache(key: str) -> Optional[any]:
-    """Load cached value with Redis fallback to Supabase."""
+# OPTIMIZED CACHE LAYER WITH BATCH READS - MOST IMPACTFUL CHANGE
+def get_cache_batch(keys: List[str]) -> Dict[str, any]:
+    """
+    Load multiple cache values in a single Supabase query.
+    This is the MOST IMPACTFUL optimization - reduces N queries to 1.
+    """
+    if not keys:
+        return {}
+    
+    cached_results = {}
+    
+    # 1. First try Redis for all keys (fastest)
     if USE_REDIS:
         try:
-            cached = redis_client.get(key)
-            if cached is not None:
-                return json.loads(cached) if cached != "null" else None
-        except Exception as e:
-            print(f"[Redis get error] {e}")
-    
-    # Fallback to Supabase
-    try:
-        res = supabase.table("cache").select("value").eq("key", key).execute()
-        
-        if not res.data or len(res.data) == 0:
-            return None
-            
-        cache_entry = res.data[0]
-        cached_value = cache_entry.get("value")
-        
-        if cached_value is None:
-            return None
-            
-        if isinstance(cached_value, str):
-            try:
-                parsed = json.loads(cached_value)
-                # Update Redis with this value if enabled
-                if USE_REDIS:
+            # Multi-get is O(1) for Redis
+            redis_values = redis_client.mget(keys)
+            for key, value in zip(keys, redis_values):
+                if value is not None:
                     try:
-                        redis_client.setex(key, 86400, json.dumps(parsed))  # 24h TTL
-                    except:
-                        pass
-                return parsed
-            except json.JSONDecodeError:
-                if cached_value in ('"null"', "null"):
-                    return None
-                return cached_value
-        else:
-            return cached_value
+                        cached_results[key] = json.loads(value) if value != "null" else None
+                    except json.JSONDecodeError:
+                        cached_results[key] = value
+        except Exception as e:
+            print(f"[Redis batch get error] {e}")
+    
+    # 2. Find which keys we still need from Supabase
+    keys_needed_from_supabase = [k for k in keys if k not in cached_results]
+    
+    if not keys_needed_from_supabase:
+        return cached_results
+    
+    # 3. SINGLE Supabase query for all remaining keys (this is the magic!)
+    try:
+        # This ONE query replaces N individual queries
+        res = supabase.table("cache")\
+            .select("key, value")\
+            .in_("key", keys_needed_from_supabase)\
+            .execute()
+        
+        # Process results
+        for item in res.data:
+            key = item["key"]
+            value = item["value"]
             
+            if value is None:
+                cached_results[key] = None
+                continue
+                
+            # Parse JSON if needed
+            if isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                    cached_results[key] = parsed
+                    # Also update Redis for future fast access
+                    if USE_REDIS:
+                        try:
+                            redis_client.setex(key, 86400, json.dumps(parsed))
+                        except:
+                            pass
+                except json.JSONDecodeError:
+                    cached_results[key] = value
+            else:
+                cached_results[key] = value
+        
+        # Mark any missing keys as None (cache miss)
+        found_keys = set(item["key"] for item in res.data)
+        for key in keys_needed_from_supabase:
+            if key not in found_keys:
+                cached_results[key] = None
+                
     except Exception as e:
-        print(f"[Cache get error for key {key}]: {e}")
-        return None
+        print(f"[Supabase batch get error] {e}")
+        # On error, mark all as None
+        for key in keys_needed_from_supabase:
+            cached_results[key] = None
+    
+    return cached_results
+
+
+def get_cache(key: str) -> Optional[any]:
+    """Single key version that uses batch internally for consistency"""
+    results = get_cache_batch([key])
+    return results.get(key)
 
 
 def set_cache(key: str, value: any):
@@ -553,7 +592,7 @@ def nominatim_lookup_with_cache(lat, lon):
 
 
 # -----------------------------
-# OPTIMIZED BATCH VALIDATION with streaming results
+# OPTIMIZED BATCH VALIDATION WITH BATCH CACHE READS - UPDATED!
 @app.route("/api/validate_batch", methods=["POST"])
 def validate_batch():
     data = request.json
@@ -561,34 +600,102 @@ def validate_batch():
     if not coordinates:
         return jsonify({"error": "No coordinates provided"}), 400
 
-    def validate_single(coord):
+    # Generate ALL cache keys for ALL coordinates first - KEY OPTIMIZATION
+    all_cache_keys = []
+    coord_info = []
+    
+    for idx, coord in enumerate(coordinates):
         lat = float(coord['lat'])
         lon = float(coord['lon'])
-        result = {'lat': lat, 'lon': lon, 'name': coord.get('name', 'Unknown')}
+        lat_r = round(lat, 4)
+        lon_r = round(lon, 4)
+        
+        # Generate cache keys for this coordinate (7 per coordinate)
+        keys = [
+            f"duckdb_buildings_building_{lat_r}_{lon_r}",
+            f"duckdb_transportation_segment_{lat_r}_{lon_r}", 
+            f"duckdb_base_water_{lat_r}_{lon_r}",
+            f"duckdb_places_place_{lat_r}_{lon_r}",
+            f"water_check_{lat_r}_{lon_r}",
+            f"worldpop_{lat_r}_{lon_r}",
+            f"nominatim_{lat_r}_{lon_r}",
+        ]
+        
+        all_cache_keys.extend(keys)
+        coord_info.append({
+            'idx': idx,
+            'coord': coord,
+            'lat': lat,
+            'lon': lon,
+            'lat_r': lat_r,
+            'lon_r': lon_r,
+            'keys': keys
+        })
+    
+    # 🔥 ONE SINGLE BATCH QUERY to get ALL cache data for ALL coordinates
+    # Instead of: 10 coordinates × 7 cache lookups = 70 Supabase queries
+    # Now: Just 1 Supabase query total!
+    cache_data = get_cache_batch(all_cache_keys)
+    
+    def validate_single(info):
+        lat = info['lat']
+        lon = info['lon']
+        keys = info['keys']
+        result = {'lat': lat, 'lon': lon, 'name': info['coord'].get('name', 'Unknown')}
 
         try:
-            building = query_with_fallback("buildings", "building", lat, lon, overpass_nearest_building)
+            # Extract cached data from our batch results
+            building_cache = cache_data.get(keys[0])
+            road_cache = cache_data.get(keys[1])
+            water_cache = cache_data.get(keys[2])
+            place_cache = cache_data.get(keys[3])
+            water_check_cache = cache_data.get(keys[4])
+            worldpop_cache = cache_data.get(keys[5])
+            nominatim_cache = cache_data.get(keys[6])
+            
+            # Use cached data if available, otherwise query
+            if building_cache is None:
+                building = query_with_fallback("buildings", "building", lat, lon, overpass_nearest_building)
+            else:
+                building = building_cache
+                building['source'] = building.get('source', 'cached')
+            
             result['building'] = {
                 'valid': building is not None,
                 'distance': round(building['distance'], 2) if building else None,
                 'source': building.get('source') if building else 'none'
             }
-
-            road = query_with_fallback("transportation", "segment", lat, lon, overpass_nearest_road)
+            
+            if road_cache is None:
+                road = query_with_fallback("transportation", "segment", lat, lon, overpass_nearest_road)
+            else:
+                road = road_cache
+                road['source'] = road.get('source', 'cached')
+            
             result['road'] = {
                 'valid': road is not None,
                 'distance': round(road['distance'], 2) if road else None,
                 'source': road.get('source') if road else 'none'
             }
-
-            water = query_with_fallback("base", "water", lat, lon)
+            
+            if water_cache is None:
+                water = query_with_fallback("base", "water", lat, lon)
+            else:
+                water = water_cache
+                water['source'] = water.get('source', 'cached')
+            
             result['water'] = {
                 'valid': water is not None,
                 'distance': round(water['distance'], 2) if water else None,
                 'source': water.get('source') if water else 'none'
             }
-
-            place = query_with_fallback("places", "place", lat, lon, overpass_nearest_place)
+            
+            if place_cache is None:
+                place = query_with_fallback("places", "place", lat, lon, overpass_nearest_place)
+            else:
+                place = place_cache
+                place['source'] = place.get('source', 'cached')
+            
             result['place'] = {
                 'valid': place is not None,
                 'distance': round(place['distance'], 2) if place else None,
@@ -596,19 +703,34 @@ def validate_batch():
                 'source': place.get('source') if place else 'none'
             }
             
-            result['on_water'] = is_point_on_water_with_fallback(lat, lon)
-            result['population'] = get_worldpop_population_with_cache(lat, lon)
-            result['nominatim'] = nominatim_lookup_with_cache(lat, lon)
+            # Use cached water check
+            if water_check_cache is None:
+                result['on_water'] = is_point_on_water_with_fallback(lat, lon)
+            else:
+                result['on_water'] = bool(water_check_cache)
             
+            # Use cached worldpop
+            if worldpop_cache is None:
+                result['population'] = get_worldpop_population_with_cache(lat, lon)
+            else:
+                result['population'] = worldpop_cache
+            
+            # Use cached nominatim
+            if nominatim_cache is None:
+                result['nominatim'] = nominatim_lookup_with_cache(lat, lon)
+            else:
+                result['nominatim'] = nominatim_cache
+                
         except Exception as e:
             result['error'] = str(e)
 
-        # Flush cache immediately after each coordinate to free memory
-        flush_cache_buffer()
-        
         return result
 
-    results = list(executor.map(validate_single, coordinates))
+    # Process all coordinates using cached data
+    results = list(executor.map(validate_single, coord_info))
+    
+    # Sort results to match input order
+    results.sort(key=lambda x: (x['lat'], x['lon']))
     
     # Final flush
     flush_cache_buffer(force=True)

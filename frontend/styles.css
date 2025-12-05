@@ -176,6 +176,123 @@
       font-weight: 600;
     }
 
+
+    /* Dataset Tabs */
+    .nav-tabs {
+      border-bottom: 1px solid #dee2e6;
+    }
+
+    .nav-tabs .nav-link {
+      color: white;
+      background-color: transparent;
+      border: 1px solid transparent;
+      border-radius: 0.25rem 0.25rem 0 0;
+      padding: 0.5rem 1rem;
+      font-size: 0.875rem;
+    }
+
+    .nav-tabs .nav-link:hover {
+      border-color: #e9ecef #e9ecef #dee2e6;
+    }
+
+    .nav-tabs .nav-link.active {
+      color: #0d6efd;
+      background-color: #fff;
+      border-color: #dee2e6 #dee2e6 #fff;
+      font-weight: 500;
+    }
+
+      /* Dataset List */
+      .dataset-list {
+        background: #f8f9fa;
+        border-radius: 0.375rem;
+        padding: 0.5rem;
+      }
+
+      .dataset-item {
+        background: white;
+        border: 1px solid #dee2e6;
+        border-radius: 0.375rem;
+        padding: 0.75rem;
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .dataset-item:hover {
+        border-color: #0d6efd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      }
+
+      .dataset-item.active {
+        border-color: #0d6efd;
+        background-color: #e7f1ff;
+      }
+
+      .dataset-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 0.5rem;
+      }
+
+      .dataset-name {
+        font-weight: 500;
+        font-size: 0.9rem;
+        margin: 0;
+      }
+
+      .dataset-meta {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+      }
+
+      .dataset-meta .badge {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.5rem;
+      }
+
+      .dataset-actions {
+        display: flex;
+        gap: 0.25rem;
+        margin-top: 0.5rem;
+      }
+
+      .dataset-actions .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.8rem;
+      }
+
+      /* Loading states */
+      .loading-spinner {
+        display: inline-block;
+        width: 1rem;
+        height: 1rem;
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #0d6efd;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 0.5rem;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      /* Empty state */
+      .empty-state {
+        text-align: center;
+        padding: 2rem 1rem;
+        color: #6c757d;
+      }
+
+      .empty-state i {
+        font-size: 2rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
+      }
     /* Main Content Styles */
     .main-content {
       flex: 1;
@@ -384,47 +501,47 @@
 
 
     /* Fix table hover colors */
-#resultsTable {
-    --bs-table-hover-bg: rgba(0, 123, 255, 0.1) !important;
-}
+    #resultsTable {
+        --bs-table-hover-bg: rgba(0, 123, 255, 0.1) !important;
+    }
 
-/* Override Bootstrap's table-hover for specific status classes */
-#resultsTable.table-hover tbody tr.table-success:hover td {
-    background-color: rgba(40, 167, 69, 0.15) !important;
-}
+    /* Override Bootstrap's table-hover for specific status classes */
+    #resultsTable.table-hover tbody tr.table-success:hover td {
+        background-color: rgba(40, 167, 69, 0.15) !important;
+    }
 
-#resultsTable.table-hover tbody tr.table-warning:hover td {
-    background-color: rgba(255, 193, 7, 0.15) !important;
-}
+    #resultsTable.table-hover tbody tr.table-warning:hover td {
+        background-color: rgba(255, 193, 7, 0.15) !important;
+    }
 
-#resultsTable.table-hover tbody tr.table-danger:hover td {
-    background-color: rgba(220, 53, 69, 0.15) !important;
-}
+    #resultsTable.table-hover tbody tr.table-danger:hover td {
+        background-color: rgba(220, 53, 69, 0.15) !important;
+    }
 
-#resultsTable.table-hover tbody tr.table-secondary:hover td {
-    background-color: rgba(108, 117, 125, 0.15) !important;
-}
+    #resultsTable.table-hover tbody tr.table-secondary:hover td {
+        background-color: rgba(108, 117, 125, 0.15) !important;
+    }
 
-/* Direct hover styles */
-#resultsTable tbody tr:hover {
-    background-color: rgba(0, 123, 255, 0.1) !important;
-}
+    /* Direct hover styles */
+    #resultsTable tbody tr:hover {
+        background-color: rgba(0, 123, 255, 0.1) !important;
+    }
 
-#resultsTable tbody tr.table-success:hover {
-    background-color: rgba(40, 167, 69, 0.15) !important;
-}
+    #resultsTable tbody tr.table-success:hover {
+        background-color: rgba(40, 167, 69, 0.15) !important;
+    }
 
-#resultsTable tbody tr.table-warning:hover {
-    background-color: rgba(255, 193, 7, 0.15) !important;
-}
+    #resultsTable tbody tr.table-warning:hover {
+        background-color: rgba(255, 193, 7, 0.15) !important;
+    }
 
-#resultsTable tbody tr.table-danger:hover {
-    background-color: rgba(220, 53, 69, 0.15) !important;
-}
+    #resultsTable tbody tr.table-danger:hover {
+        background-color: rgba(220, 53, 69, 0.15) !important;
+    }
 
-#resultsTable tbody tr.table-secondary:hover {
-    background-color: rgba(108, 117, 125, 0.15) !important;
-}
+    #resultsTable tbody tr.table-secondary:hover {
+        background-color: rgba(108, 117, 125, 0.15) !important;
+    }
 
     /* Map Container */
     .map-container {

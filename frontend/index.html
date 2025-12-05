@@ -33,37 +33,120 @@
     </button>
 
     <!-- Sidebar -->
+    <!-- Sidebar -->
     <div class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <i class="fas fa-clinic-medical"></i>
         <h3>GPS Validation</h3>
       </div>
 
+      <!-- Dataset Source Tabs -->
       <div class="sidebar-section">
-        <h5>Data Upload</h5>
-        <label class="form-label">Select Country</label>
-        <select class="form-select" id="countrySelect">
-          <option value="">-- Select a country --</option>
-          <option value="MW">Malawi</option>
-          <option value="KE">Kenya</option>
-          <option value="TZ">Tanzania</option>
-          <option value="UG">Uganda</option>
-          <option value="ZM">Zambia</option>
-          <option value="ZW">Zimbabwe</option>
-          <option value="NG">Nigeria</option>
-        </select>
+        <ul class="nav nav-tabs mb-3" id="datasetTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-pane"
+              type="button" role="tab">
+              <i class="fas fa-upload me-1"></i> Upload
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="cache-tab" data-bs-toggle="tab" data-bs-target="#cache-pane" type="button"
+              role="tab">
+              <i class="fas fa-database me-1"></i> Cached
+            </button>
+          </li>
+        </ul>
 
-        <label class="form-label mt-3">Upload CSV File</label>
-        <input type="file" class="form-control" id="fileUpload" accept=".csv">
-        <div class="form-text">CSV columns: Name, x, y, Admin1, Admin2, Admin3</div>
+        <!-- Tab Content -->
+        <div class="tab-content" id="datasetTabsContent">
+          <!-- Upload Tab -->
+          <div class="tab-pane fade show active" id="upload-pane" role="tabpanel">
+            <h5>Upload New Dataset</h5>
+            <label class="form-label">Select Country</label>
+            <select class="form-select" id="countrySelect">
+              <option value="">-- Select a country --</option>
+              <option value="MW">Malawi</option>
+              <option value="KE">Kenya</option>
+              <option value="TZ">Tanzania</option>
+              <option value="UG">Uganda</option>
+              <option value="ZM">Zambia</option>
+              <option value="ZW">Zimbabwe</option>
+              <option value="NG">Nigeria</option>
+            </select>
 
-        <button class="btn btn-primary mt-3" id="validateBtn" disabled>
-          <i class="fas fa-play-circle me-2"></i>Validate Coordinates
-        </button>
+            <label class="form-label mt-3">Upload CSV File</label>
+            <input type="file" class="form-control" id="fileUpload" accept=".csv">
+            <div class="form-text">CSV columns: Name, x, y, Admin1, Admin2, Admin3</div>
 
+            <button class="btn btn-primary mt-3 w-100" id="validateBtn" disabled>
+              <i class="fas fa-play-circle me-2"></i>Validate Coordinates
+            </button>
+
+            <!-- <div class="d-grid gap-2 mt-3">
+              <button class="btn btn-outline-primary" id="saveToCacheBtn" disabled>
+                <i class="fas fa-save me-1"></i>Save to Cache
+              </button>
+            </div> -->
+          </div>
+
+          <!-- Cached Datasets Tab -->
+          <div class="tab-pane fade" id="cache-pane" role="tabpanel">
+            <h5>Cached Datasets</h5>
+
+            <!-- Search and Filter -->
+            <div class="input-group mb-3">
+              <input type="text" class="form-control" id="datasetSearch" placeholder="Search datasets...">
+              <button class="btn btn-outline-secondary" type="button" id="clearSearch">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+
+            <!-- Filters -->
+            <div class="row g-2 mb-3">
+              <div class="col-6">
+                <select class="form-select form-select-sm" id="countryFilter">
+                  <option value="">All Countries</option>
+                  <option value="MW">Malawi</option>
+                  <option value="KE">Kenya</option>
+                  <option value="TZ">Tanzania</option>
+                  <option value="UG">Uganda</option>
+                  <option value="ZM">Zambia</option>
+                  <option value="ZW">Zimbabwe</option>
+                  <option value="NG">Nigeria</option>
+                </select>
+              </div>
+              <div class="col-6">
+                <select class="form-select form-select-sm" id="sortFilter">
+                  <option value="newest">Newest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="name">Name A-Z</option>
+                  <option value="size">Size (Large)</option>
+                  <option value="facilities">Most Facilities</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Dataset List -->
+            <div id="cachedDatasetsList" class="dataset-list" style="max-height: 350px; overflow-y: auto;">
+              <div class="text-center py-4 text-muted">
+                <i class="fas fa-spinner fa-spin me-2"></i>
+                <p>Loading cached datasets...</p>
+              </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="d-grid gap-2 mt-3">
+              <button class="btn btn-primary mt-3 w-100" id="refreshDatasetsBtn">
+                <i class="fas fa-sync-alt me-1"></i>Refresh List
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- API Status (Shared) -->
         <div class="api-status mt-3" id="apiStatus">Ready for validation</div>
 
-        <!-- Overall Progress Bar -->
+        <!-- Overall Progress Bar (Shared) -->
         <div class="overall-progress mt-4" id="overallProgress" style="display:none;">
           <div class="progress-summary">
             <span id="progressText">Processing...</span>
@@ -75,14 +158,14 @@
           </div>
         </div>
 
-        <!-- Timer -->
+        <!-- Timer (Shared) -->
         <div id="runtimeContainer" class="runtime-box">
           <div><small>Total Runtime:</small> <span id="totalElapsed">0s</span></div>
           <div><small>ETA:</small> <span id="eta">Estimating…</span></div>
         </div>
-
       </div>
 
+      <!-- Existing Data Summary -->
       <div class="sidebar-section">
         <h5>Data Summary</h5>
         <div id="dataSummary">
@@ -91,15 +174,6 @@
           </div>
         </div>
       </div>
-
-      <!-- <div class="sidebar-section">
-        <h5>Validation Summary</h5>
-        <div id="validationResults">
-          <div class="summary-card">
-            <p class="text-muted">Upload a file and click validate</p>
-          </div>
-        </div>
-      </div> -->
     </div>
 
     <!-- Main Content -->
