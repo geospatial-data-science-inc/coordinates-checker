@@ -85,9 +85,6 @@ function formatTime(sec) {
   return `${m}m ${s}s`;
 }
 
-// Initialize DataTable
-$("#resultsTable thead").addClass("table-primary");
-
 $(document).ready(function () {
   window.resultsTable = $("#resultsTable").DataTable({
     searchPanes: { cascadePanes: true, viewTotal: true },

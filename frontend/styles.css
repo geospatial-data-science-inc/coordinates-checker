@@ -379,8 +379,52 @@
     }
 
     #resultsTable tbody tr:hover {
-      background-color: var(--primary-color);
+      background-color: var(--primary-color) !important;
     }
+
+
+    /* Fix table hover colors */
+#resultsTable {
+    --bs-table-hover-bg: rgba(0, 123, 255, 0.1) !important;
+}
+
+/* Override Bootstrap's table-hover for specific status classes */
+#resultsTable.table-hover tbody tr.table-success:hover td {
+    background-color: rgba(40, 167, 69, 0.15) !important;
+}
+
+#resultsTable.table-hover tbody tr.table-warning:hover td {
+    background-color: rgba(255, 193, 7, 0.15) !important;
+}
+
+#resultsTable.table-hover tbody tr.table-danger:hover td {
+    background-color: rgba(220, 53, 69, 0.15) !important;
+}
+
+#resultsTable.table-hover tbody tr.table-secondary:hover td {
+    background-color: rgba(108, 117, 125, 0.15) !important;
+}
+
+/* Direct hover styles */
+#resultsTable tbody tr:hover {
+    background-color: rgba(0, 123, 255, 0.1) !important;
+}
+
+#resultsTable tbody tr.table-success:hover {
+    background-color: rgba(40, 167, 69, 0.15) !important;
+}
+
+#resultsTable tbody tr.table-warning:hover {
+    background-color: rgba(255, 193, 7, 0.15) !important;
+}
+
+#resultsTable tbody tr.table-danger:hover {
+    background-color: rgba(220, 53, 69, 0.15) !important;
+}
+
+#resultsTable tbody tr.table-secondary:hover {
+    background-color: rgba(108, 117, 125, 0.15) !important;
+}
 
     /* Map Container */
     .map-container {
