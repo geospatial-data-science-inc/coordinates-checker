@@ -913,7 +913,8 @@ function updateResultsTable(results) {
         : `<span class="badge ${
             f.buildingDistance?.valid ? "bg-success" : "bg-warning"
           }">${
-            f.buildingDistance?.distance !== undefined
+            f.buildingDistance?.distance !== undefined &&
+            f.buildingDistance?.distance !== null
               ? f.buildingDistance?.distance.toFixed(2)
               : "N/A"
           }</span>`,
