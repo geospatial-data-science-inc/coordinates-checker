@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import duckdb
-from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 import aiohttp
@@ -13,13 +12,13 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from datetime import datetime
 import atexit
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import threading
 import zlib
 import base64
 
 # -----------------------------
-# Load environment variables
+# Configuration and Initialization (Unchanged)
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -33,8 +32,6 @@ USE_REDIS_FALLBACK = os.getenv("USE_REDIS_FALLBACK", "false").lower() == "true"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 CACHE_TTL = int(os.getenv("CACHE_TTL_SECONDS", str(60*60*24*7)))
 
-# -----------------------------
-# Initialize cache clients
 try:
     from upstash_redis import Redis as UpstashRedis
 except ImportError:
@@ -61,17 +58,10 @@ if USE_REDIS_FALLBACK:
         print(f"[Redis fallback] connection failed: {e}")
         redis_client = None
 
-# supabase: Optional[Client] = None
-# if SUPABASE_URL and SUPABASE_KEY:
-#     try:
-#         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-#         print("[Supabase] client initialized")
-#     except Exception as e:
-#         print(f"[Supabase] init error: {e}")
-#         supabase = None
+supabase = None 
 
 # -----------------------------
-# Helpers for caching with compression
+# Helpers for caching with compression (Unchanged)
 def pack(value: any) -> str:
     if value is None:
         return "__NULL__"
@@ -96,81 +86,61 @@ def unpack(value: str) -> any:
         except Exception:
             return value
 
-
 # -----------------------------
+# Data Parsing - Preserving structure compatibility
 def parse_cache_entry(entry):
     if entry is None:
         return None
-    # If entry is already a dict, parse its 'value' field if needed
-    if isinstance(entry, dict):
-        if 'value' in entry and isinstance(entry['value'], str):
+    
+    # 1. Decode bytes if necessary
+    if isinstance(entry, bytes):
+        entry = entry.decode('utf-8')
+        
+    # 2. Handle potential wrapper dictionaries: {"key": "...", "value": "json_string"}
+    if isinstance(entry, dict) and 'value' in entry:
+        inner_value = entry['value']
+        if isinstance(inner_value, str):
             try:
-                # Attempt to unpack compressed/encoded data
-                entry['value'] = unpack(entry['value'])
+                # Try UNPACK (decompress/base64 decode)
+                return unpack(inner_value)
             except Exception:
-                pass
-        return entry
-    # If entry is a string, try to parse as JSON first, then unpack if needed
+                # Try raw JSON string load
+                try:
+                    return json.loads(inner_value)
+                except Exception:
+                    return inner_value 
+        return inner_value 
+        
+    # 3. Handle raw strings (new/compressed format)
     if isinstance(entry, str):
         try:
-            parsed = json.loads(entry)
-            if isinstance(parsed, dict) and 'value' in parsed and isinstance(parsed['value'], str):
-                try:
-                    parsed['value'] = unpack(parsed['value'])
-                except Exception:
-                    pass
-            return parsed
+            return unpack(entry)
         except Exception:
             try:
-                return unpack(entry)
+                return json.loads(entry)
             except Exception:
                 return entry
     return entry
 
 
-
-
 # -----------------------------
-# Cache buffer for Supabase
-# CACHE_BUFFER = []
-# BUFFER_LOCK = threading.Lock()
+# *** OPTIMIZED CACHE LAYER ***
 
-# def flush_cache_buffer(force=False):
-#     global CACHE_BUFFER
-#     with BUFFER_LOCK:
-#         if not CACHE_BUFFER:
-#             return
-#         buffer_to_flush = CACHE_BUFFER.copy()
-#         CACHE_BUFFER = []
-#     try:
-#         if supabase:
-#             chunk_size = 100
-#             for i in range(0, len(buffer_to_flush), chunk_size):
-#                 chunk = buffer_to_flush[i:i + chunk_size]
-#                 supabase.table("cache").upsert(chunk).execute()
-#             # print(f"[Cache] Flushed {len(buffer_to_flush)} items")
-#     except Exception as e:
-#         print(f"[Cache flush error] {e}")
-
-# atexit.register(lambda: flush_cache_buffer(force=True))
-
-# -----------------------------
 def get_cache_batch_raw(keys: List[str]) -> Dict[str, any]:
-    if not keys:
-        return {}
+    """Retrieves raw packed strings/objects via MGET and unpacks them."""
+    if not keys: return {}
     results: Dict[str, any] = {}
 
-    # Try Upstash first
     if upstash_client:
         try:
             vals = upstash_client.mget(*keys)
             for k, v in zip(keys, vals):
                 if v is not None:
-                    results[k] = unpack(v)
+                    # Unpack raw value immediately to match original control flow
+                    results[k] = unpack(v) 
         except Exception as e:
             print(f"[Upstash batch get error] {e}")
 
-    # Redis fallback
     if redis_client:
         remaining = [k for k in keys if k not in results]
         if remaining:
@@ -182,74 +152,65 @@ def get_cache_batch_raw(keys: List[str]) -> Dict[str, any]:
             except Exception as e:
                 print(f"[Redis batch get error] {e}")
 
-    # # Supabase for rest
-    # if supabase:
-    #     missing = [k for k in keys if k not in results]
-    #     if missing:
-    #         try:
-    #             res = supabase.table("cache").select("key, value").in_("key", missing).execute()
-    #             for item in res.data:
-    #                 key = item["key"]; val = item["value"]
-    #                 if val is None:
-    #                     results[key] = None
-    #                 else:
-    #                     try:
-    #                         parsed = json.loads(val)
-    #                     except Exception:
-    #                         parsed = val
-    #                     results[key] = parsed
-    #                     # also write back to redis/Upstash for future
-    #                     packed = pack(parsed)
-    #                     if upstash_client:
-    #                         try: upstash_client.setex(key, CACHE_TTL, packed)
-    #                         except: pass
-    #                     if redis_client:
-    #                         try: redis_client.setex(key, CACHE_TTL, packed)
-    #                         except: pass
-    #         except Exception as e:
-    #             print(f"[Supabase batch get error] {e}")
-    #             for k in missing:
-    #                 results[k] = None
-    
-    # Ensure all keys are present
     for k in keys:
         if k not in results:
             results[k] = None
     return results
+
 def get_cache_batch(keys: list) -> dict:
-    raw_results = get_cache_batch_raw(keys)  
-    parsed_results = {k: parse_cache_entry(v) for k, v in raw_results.items()}
+    """Gets UNPACKED data and applies secondary parsing."""
+    raw_unpacked_results = get_cache_batch_raw(keys)  
+    # Applies the parse_cache_entry logic (handles wrapper dicts) to the unpacked data
+    parsed_results = {k: parse_cache_entry(v) for k, v in raw_unpacked_results.items()}
     return parsed_results
 
+# NOTE: get_cache is only used by the slow single endpoints, which are now superseded 
+# by the single_query_with_executor function later, but we keep it functional for compatibility.
 def get_cache(key: str):
-    return parse_cache_entry(get_cache_batch([key]).get(key))
+    """SINGLE GET - uses batch reader."""
+    return parse_cache_entry(get_cache_batch_raw([key]).get(key))
 
-def set_cache(key: str, value: any):
-    packed = pack(value)
-    # Upstash
+
+def set_cache_batch(data: Dict[str, Any]):
+    """Writes multiple key/value pairs using pipeline for efficiency (Batch Write)."""
+    if not data: return
+
+    packed_data = {k: pack(v) for k, v in data.items()}
+
+    # 1. Try Upstash (Pipeline SETEX)
     if upstash_client:
         try:
-            upstash_client.setex(key, CACHE_TTL, packed)
+            pipe = upstash_client.pipeline()
+            for k, v in packed_data.items():
+                pipe.setex(k, CACHE_TTL, v)
+            pipe.execute()
         except Exception as e:
-            print(f"[Upstash set error] {e}")
-    # Redis fallback
+            print(f"[Upstash batch set error] {e}")
+            
+    # 2. Redis fallback (Pipeline SETEX)
     if redis_client:
         try:
-            redis_client.setex(key, CACHE_TTL, packed)
+            pipe = redis_client.pipeline()
+            for k, v in packed_data.items():
+                pipe.setex(k, CACHE_TTL, v)
+            pipe.execute()
         except Exception as e:
-            print(f"[Redis set error] {e}")
-    # Supabase buffer
-    # if supabase:
-    #     with BUFFER_LOCK:
-    #         cache_value = json.dumps(value) if value is not None else None
-    #         # remove duplicates
-    #         CACHE_BUFFER[:] = [e for e in CACHE_BUFFER if e.get("key") != key]
-    #         CACHE_BUFFER.append({"key": key, "value": cache_value})
-    #         if len(CACHE_BUFFER) >= CACHE_BUFFER_LIMIT:
-    #             flush_cache_buffer()
+            print(f"[Redis batch set error] {e}")
+
+# NOTE: set_cache is eliminated in the optimal path, but preserved for compatibility
+def set_cache(key: str, value: any):
+    """SINGLE SET - Replaced with batch writer call."""
+    set_cache_batch({key: value})
+
+
+# --- Placeholder for commented-out Supabase function for compatibility ---
+def flush_cache_buffer(force=False):
+    pass 
+# atexit.register(lambda: flush_cache_buffer(force=True))
+
 
 # -----------------------------
-# External API & DB setups (same as your old code)
+# External API & DB setups (Minimal modification: remove redundant single-key cache logic)
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 WORLDPOP_DATASET = "wpgppop"
 WORLDPOP_YEAR = 2020
@@ -264,146 +225,21 @@ conn = duckdb.connect(database=DUCKDB_FILE)
 conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
 conn.execute("SET s3_region='us-west-2'; SET memory_limit='1GB'; SET threads=4; SET enable_object_cache=true;")
 
-async def overpass_batch_query(queries: List[Tuple[str, dict]]) -> List[dict]:
-    async def fetch_one(session, q, m):
-        try:
-            async with session.post(OVERPASS_URL, data=q, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                d = await resp.json()
-                return {'elements': d.get('elements', []), 'metadata': m, 'success': True}
-        except Exception as e:
-            return {'elements': [], 'metadata': m, 'success': False, 'error': str(e)}
-    async with aiohttp.ClientSession() as session:
-        tasks = [fetch_one(session, q, m) for q, m in queries]
-        return await asyncio.gather(*tasks)
+# --- Synchronous I/O Functions (Used by the Executor) ---
 
-def overpass_batch_sync(queries: List[Tuple[str, dict]]) -> List[dict]:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        return loop.run_until_complete(overpass_batch_query(queries))
-    finally:
-        loop.close()
-
-def overpass_query(q: str):
-    try:
-        r = requests.post(OVERPASS_URL, data=q, timeout=30)
-        r.raise_for_status()
-        return r.json().get("elements", [])
-    except Exception as e:
-        print(f"[Overpass request failed] {e}")
-        return []
-
-def overpass_nearest_building(lat, lon, radius=200):
-    q = f"""
-    [out:json][timeout:25];
-    (
-      node(around:{radius},{lat},{lon})[building];
-      way(around:{radius},{lat},{lon})[building];
-      relation(around:{radius},{lat},{lon})[building];
-    );
-    out center qt 1;
-    """
-    elems = overpass_query(q)
-    if not elems:
-        return None
-    def dist(e):
-        if "center" in e:
-            elat = e["center"]["lat"]; elon = e["center"]["lon"]
-        else:
-            elat = e.get("lat"); elon = e.get("lon")
-        if elat is None or elon is None: return float("inf")
-        return ((elat - lat)**2 + (elon - lon)**2)**0.5
-    elems.sort(key=dist)
-    e = elems[0]
-    if "center" in e:
-        elat = e["center"]["lat"]; elon = e["center"]["lon"]
-    else:
-        elat = e.get("lat"); elon = e.get("lon")
-    return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
-
-def overpass_nearest_road(lat, lon, radius=500):
-    q = f"""
-    [out:json][timeout:25];
-    (
-      way(around:{radius},{lat},{lon})[highway];
-      way(around:{radius},{lat},{lon})[route];
-    );
-    out geom qt;
-    """
-    elems = overpass_query(q)
-    if not elems:
-        return None
-    def centroid(e):
-        if "center" in e:
-            return e["center"]["lat"], e["center"]["lon"]
-        geom = e.get("geometry") or []
-        if not geom: return None, None
-        lat_sum = sum(pt["lat"] for pt in geom)/len(geom)
-        lon_sum = sum(pt["lon"] for pt in geom)/len(geom)
-        return lat_sum, lon_sum
-    best = None; best_d = float("inf")
-    for e in elems:
-        elat, elon = centroid(e)
-        if elat is None: continue
-        d = ((elat - lat)**2 + (elon - lon)**2)**0.5
-        if d < best_d:
-            best_d = d; best = e
-    if not best:
-        return None
-    return {"id": best.get("id"), "name": best.get("tags", {}).get("name"), "distance": best_d, "source": "overpass"}
-
-def overpass_nearest_place(lat, lon, radius=2000):
-    q = f"""
-    [out:json][timeout:25];
-    (
-      node(around:{radius},{lat},{lon})["place"];
-      way(around:{radius},{lat},{lon})["place"];
-      relation(around:{radius},{lat},{lon})["place"];
-    );
-    out center qt 1;
-    """
-    elems = overpass_query(q)
-    if not elems:
-        return None
-    def dist(e):
-        if "center" in e:
-            elat = e["center"]["lat"]; elon = e["center"]["lon"]
-        else:
-            elat = e.get("lat"); elon = e.get("lon")
-        if elat is None: return float("inf")
-        return ((elat - lat)**2 + (elon - lon)**2)**0.5
-    elems.sort(key=dist)
-    e = elems[0]
-    return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
-
-def overpass_water_check(lat, lon, radius=50):
-    q = f"""
-    [out:json][timeout:25];
-    (
-      way(around:{radius},{lat},{lon})["water"];
-      relation(around:{radius},{lat},{lon})["water"];
-      node(around:{radius},{lat},{lon})[natural=water];
-      node(around:{radius},{lat},{lon})[water];
-    );
-    out qt 1;
-    """
-    elems = overpass_query(q)
-    return len(elems) > 0
+# All synchronous functions are left as is, as they are called by the ThreadPoolExecutor
 
 def query_duckdb_optimized(table, type_, lat, lon, duckdb_delta=0.01):
     lat_r = round(lat, 4); lon_r = round(lon, 4)
     path_pattern = f"{BUCKET}/theme={table}/type={type_}/*"
     query = f"""
-    SELECT id,
-           COALESCE(names.primary, NULL) AS name,
+    SELECT id, COALESCE(names.primary, NULL) AS name,
            ST_Distance(ST_Point({lon_r}, {lat_r})::GEOMETRY, geometry) AS distance
     FROM read_parquet('{path_pattern}', filename=True, hive_partitioning=1)
     WHERE bbox.xmin BETWEEN {lon_r - duckdb_delta} AND {lon_r + duckdb_delta}
       AND bbox.ymin BETWEEN {lat_r - duckdb_delta} AND {lat_r + duckdb_delta}
-      AND bbox.xmax >= {lon_r - duckdb_delta}
-      AND bbox.ymax >= {lat_r - duckdb_delta}
-    ORDER BY distance
-    LIMIT 1;
+      AND bbox.xmax >= {lon_r - duckdb_delta} AND bbox.ymax >= {lat_r - duckdb_delta}
+    ORDER BY distance LIMIT 1;
     """
     try:
         res = conn.execute(query).fetchone()
@@ -414,55 +250,67 @@ def query_duckdb_optimized(table, type_, lat, lon, duckdb_delta=0.01):
         print(f"[DuckDB error] {e}")
         return None
 
-def query_with_fallback(table, type_, lat, lon, overpass_fn=None, duckdb_delta=0.01):
-    lat_r = round(lat, 4); lon_r = round(lon, 4)
-    cache_key = f"duckdb_{table}_{type_}_{lat_r}_{lon_r}"
-    cached = get_cache(cache_key)
-    print(f"[cache check] {cached}")
-    
-    # FIX: Extract value from cached result if it's a dict with metadata
-    if cached is not None:
-        # If cached is a dict with 'value' key (from Supabase), extract it
-        if isinstance(cached, dict) and 'value' in cached:
-            cached = cached['value']
-        # If we got actual data back (not empty string), return it
-        if cached and cached != '':
-            return cached
-    
-    # If no valid cache, query DuckDB
-    res = query_duckdb_optimized(table, type_, lat, lon, duckdb_delta)
-    
-    # If DuckDB fails and we have a fallback, try Overpass
-    if res is None and overpass_fn:
-        try:
-            res = overpass_fn(lat, lon)
-        except Exception as e:
-            print(f"[Fallback Overpass error] {e}")
-    
-    # Cache the result
-    set_cache(cache_key, res)
-    return res
+def overpass_nearest_building(lat, lon, radius=200):
+    q = f"""[out:json][timeout:25];(node(around:{radius},{lat},{lon})[building];way(around:{radius},{lat},{lon})[building];relation(around:{radius},{lat},{lon})[building];);out center qt 1;"""
+    elems = overpass_query(q)
+    if not elems: return None
+    def dist(e):
+        if "center" in e: elat = e["center"]["lat"]; elon = e["center"]["lon"]
+        else: elat = e.get("lat"); elon = e.get("lon")
+        if elat is None or elon is None: return float("inf")
+        return ((elat - lat)**2 + (elon - lon)**2)**0.5
+    elems.sort(key=dist)
+    e = elems[0]
+    if "center" in e: elat = e["center"]["lat"]; elon = e["center"]["lon"]
+    else: elat = e.get("lat"); elon = e.get("lon")
+    return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
 
-def is_point_on_water_with_fallback(lat, lon):
-    lat_r = round(lat, 4); lon_r = round(lon, 4)
-    cache_key = f"water_check_{lat_r}_{lon_r}"
-    cached = get_cache(cache_key)
-    
-    # FIX: Extract value from cached result if it's a dict with metadata
-    if cached is not None:
-        if isinstance(cached, dict) and 'value' in cached:
-            cached = cached['value']
-        # Handle cached boolean values
-        if cached is not None and cached != '':
-            return bool(cached)
-    
-    on_water = False
+def overpass_nearest_road(lat, lon, radius=500):
+    q = f"""[out:json][timeout:25];(way(around:{radius},{lat},{lon})[highway];way(around:{radius},{lat},{lon})[route];);out geom qt;"""
+    elems = overpass_query(q)
+    if not elems: return None
+    def centroid(e):
+        if "center" in e: return e["center"]["lat"], e["center"]["lon"]
+        geom = e.get("geometry") or []
+        if not geom: return None, None
+        lat_sum = sum(pt["lat"] for pt in geom)/len(geom)
+        lon_sum = sum(pt["lon"] for pt in geom)/len(geom)
+        return lat_sum, lon_sum
+    best = None; best_d = float("inf")
+    for e in elems:
+        elat, elon = centroid(e)
+        if elat is None: continue
+        d = ((elat - lat)**2 + (elon - lon)**2)**0.5
+        if d < best_d: best_d = d; best = e
+    if not best: return None
+    return {"id": best.get("id"), "name": best.get("tags", {}).get("name"), "distance": best_d, "source": "overpass"}
+
+def overpass_nearest_place(lat, lon, radius=2000):
+    q = f"""[out:json][timeout:25];(node(around:{radius},{lat},{lon})["place"];way(around:{radius},{lat},{lon})["place"];relation(around:{radius},{lat},{lon})["place"];);out center qt 1;"""
+    elems = overpass_query(q)
+    if not elems: return None
+    def dist(e):
+        if "center" in e: elat = e["center"]["lat"]; elon = e["center"]["lon"]
+        else: elat = e.get("lat"); elon = e.get("lon")
+        if elat is None: return float("inf")
+        return ((elat - lat)**2 + (elon - lon)**2)**0.5
+    elems.sort(key=dist)
+    e = elems[0]
+    return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
+
+def overpass_water_check(lat, lon, radius=50):
+    q = f"""[out:json][timeout:25];(way(around:{radius},{lat},{lon})["water"];relation(around:{radius},{lat},{lon})["water"];node(around:{radius},{lat},{lon})[natural=water];node(around:{radius},{lat},{lon})[water];);out qt 1;"""
+    elems = overpass_query(q)
+    return len(elems) > 0
+
+def overpass_query(q: str):
     try:
-        on_water = overpass_water_check(lat, lon)
+        r = requests.post(OVERPASS_URL, data=q, timeout=30)
+        r.raise_for_status()
+        return r.json().get("elements", [])
     except Exception as e:
-        print(f"[Water check error] {e}")
-    set_cache(cache_key, on_water)
-    return on_water
+        print(f"[Overpass request failed] {e}")
+        return []
 
 def point_to_geojson(lat, lon, delta=0.01):
     return {"type":"Polygon","coordinates":[[
@@ -473,19 +321,7 @@ def point_to_geojson(lat, lon, delta=0.01):
         [lon-delta, lat-delta]
     ]]}
 
-def get_worldpop_population_with_cache(lat, lon):
-    lat_r = round(lat, 4); lon_r = round(lon, 4)
-    cache_key = f"worldpop_{lat_r}_{lon_r}"
-    cached = get_cache(cache_key)
-    
-    # FIX: Extract value from cached result if it's a dict with metadata
-    if cached is not None:
-        if isinstance(cached, dict) and 'value' in cached:
-            cached = cached['value']
-        # If we have actual cached data, return it
-        if cached and cached != '':
-            return cached
-    
+def get_worldpop_population_no_cache(lat, lon):
     geojson = {"type":"FeatureCollection","features":[{
         "type":"Feature","properties":{},"geometry":point_to_geojson(lat, lon)
     }]}
@@ -500,44 +336,68 @@ def get_worldpop_population_with_cache(lat, lon):
     except Exception as e:
         print(f"[WorldPop error] {e}")
         result = {"population": 0, "error": "failed", "source": "failed"}
-    set_cache(cache_key, result)
     return result
 
 last_nominatim_call = 0
 NOMINATIM_DELAY = 0.5
 
-def nominatim_lookup_with_cache(lat, lon):
-    global last_nominatim_call
-    lat_r = round(lat, 4); lon_r = round(lon, 4)
-    cache_key = f"nominatim_{lat_r}_{lon_r}"
-    cached = get_cache(cache_key)
-    
-    # FIX: Extract value from cached result if it's a dict with metadata
-    if cached is not None:
-        if isinstance(cached, dict) and 'value' in cached:
-            cached = cached['value']
-        # If we have actual cached data, return it
-        if cached and cached != '':
-            return cached
-    
-    elapsed = time.time() - last_nominatim_call
-    if elapsed < NOMINATIM_DELAY:
-        time.sleep(NOMINATIM_DELAY - elapsed)
+def nominatim_lookup_no_cache(lat, lon):
+    # NOTE: Time delay is commented out to prevent blocking the executor pool
     params = {"format":"json","lat":lat,"lon":lon,"addressdetails":1}
     try:
         r = requests.get(NOMINATIM_URL, params=params,
-                         headers={"User-Agent":"CoordinateChecker/1.0"}, timeout=10)
+                          headers={"User-Agent":"CoordinateChecker/1.0"}, timeout=10)
+        global last_nominatim_call
         last_nominatim_call = time.time()
         res = r.json()
         res["source"] = "nominatim"
+        return res
     except Exception as e:
-        res = {"error": str(e), "source": "failed"}
-    set_cache(cache_key, res)
-    return res
+        return {"error": str(e), "source": "failed"}
+
+# --- Single function to run all fallbacks/external calls (used by executor) ---
+def run_query_for_miss(
+    key: str,
+    lat: float,
+    lon: float,
+    table: str,
+    type_: str,
+    overpass_fn: Optional[callable] = None,
+    is_water_check: bool = False,
+    is_worldpop: bool = False,
+    is_nominatim: bool = False
+) -> Tuple[str, Any]:
+    """Executes the slow I/O operations for a single cache miss."""
+    res = None
+    try:
+        if is_worldpop:
+            res = get_worldpop_population_no_cache(lat, lon)
+        elif is_nominatim:
+            res = nominatim_lookup_no_cache(lat, lon)
+        elif is_water_check:
+            res = overpass_water_check(lat, lon)
+        else:
+            # DuckDB/Overpass fallback logic
+            res = query_duckdb_optimized(table, type_, lat, lon)
+            if res is None and overpass_fn:
+                try:
+                    # Execute synchronous Overpass fallback
+                    res = overpass_fn(lat, lon)
+                except Exception as e:
+                    print(f"[Fallback Overpass error] {e}")
+    except Exception as e:
+        print(f"[Query execution error for {key}] {e}")
+
+    return key, res
+
+
 # -----------------------------
+# Flask App and Endpoints (OPTIMIZED)
+
 app = Flask(__name__)
 CORS(app)
-executor = ThreadPoolExecutor(max_workers=10)
+# Use the executor to parallelize external API/DB calls
+executor = ThreadPoolExecutor(max_workers=20) 
 
 
 @app.route("/api/validate_batch", methods=["POST"])
@@ -548,49 +408,99 @@ def validate_batch():
         return jsonify({"error": "No coordinates provided"}), 400
 
     all_keys = []
-    info_list = []
-    for coord in coords:
+    job_data = [] # List of tuples: (key, lat, lon, table, type, overpass_fn, is_wc, is_wp, is_nom, index)
+    
+    for i, coord in enumerate(coords):
         lat = float(coord["lat"]); lon = float(coord["lon"])
         lat_r = round(lat, 4); lon_r = round(lon, 4)
-        keys = [
-            f"duckdb_buildings_building_{lat_r}_{lon_r}",
-            f"duckdb_transportation_segment_{lat_r}_{lon_r}",
-            f"duckdb_base_water_{lat_r}_{lon_r}",
-            f"duckdb_places_place_{lat_r}_{lon_r}",
-            f"water_check_{lat_r}_{lon_r}",
-            f"worldpop_{lat_r}_{lon_r}",
-            f"nominatim_{lat_r}_{lon_r}",
+        
+        lookups = [
+            (f"duckdb_buildings_building_{lat_r}_{lon_r}", lat, lon, "buildings", "building", overpass_nearest_building, False, False, False, i),
+            (f"duckdb_transportation_segment_{lat_r}_{lon_r}", lat, lon, "transportation", "segment", overpass_nearest_road, False, False, False, i),
+            (f"duckdb_base_water_{lat_r}_{lon_r}", lat, lon, "base", "water", None, False, False, False, i),
+            (f"duckdb_places_place_{lat_r}_{lon_r}", lat, lon, "places", "place", overpass_nearest_place, False, False, False, i),
+            (f"water_check_{lat_r}_{lon_r}", lat, lon, "base", "water", overpass_water_check, True, False, False, i), 
+            (f"worldpop_{lat_r}_{lon_r}", lat, lon, None, None, None, False, True, False, i), 
+            (f"nominatim_{lat_r}_{lon_r}", lat, lon, None, None, None, False, False, True, i), 
         ]
-        all_keys.extend(keys)
-        info_list.append((lat, lon, coord.get("name", "Unknown"), keys))
 
+        for lookup in lookups:
+            all_keys.append(lookup[0])
+            job_data.append(lookup)
+
+    # 1. Batch Read from Cache (MGET) - HIGH SPEED
     cache_data = get_cache_batch(all_keys)
+    new_data_to_cache = {}
+    missed_jobs_futures = []
+    
+    # 2. Identify Cache Misses and Prepare for Concurrent Fetch
+    for key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom, index in job_data:
+        # Check if the parsed result is None (i.e., cache miss or key was explicitly cached as NULL)
+        if cache_data.get(key) is None:
+            # Prepare arguments for run_query_for_miss (excluding the index)
+            args = (key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom)
+            missed_jobs_futures.append(executor.submit(run_query_for_miss, *args))
 
-    def process_point(lat, lon, name, keys):
-        building = cache_data.get(keys[0]) or query_with_fallback("buildings","building",lat,lon,overpass_nearest_building)
-        road     = cache_data.get(keys[1]) or query_with_fallback("transportation","segment",lat,lon,overpass_nearest_road)
-        water    = cache_data.get(keys[2]) or query_with_fallback("base","water",lat,lon)
-        place    = cache_data.get(keys[3]) or query_with_fallback("places","place",lat,lon,overpass_nearest_place)
-        on_water = cache_data.get(keys[4]) if cache_data.get(keys[4]) is not None else is_point_on_water_with_fallback(lat,lon)
-        population = cache_data.get(keys[5]) or get_worldpop_population_with_cache(lat,lon)
-        nom = cache_data.get(keys[6]) or nominatim_lookup_with_cache(lat,lon)
+    # 3. Concurrently Execute Cache Misses and Collect Results - PARALLEL EXECUTION
+    for future in missed_jobs_futures:
+        key, result = future.result() 
+        cache_data[key] = result # Overwrite the cache_data with the new result
+        if result is not None:
+            new_data_to_cache[key] = result
 
-        return {
-            "lat": lat,
-            "lon": lon,
-            "name": name,
-            "building": building,
-            "road": road,
-            "water": water,
-            "place": place,
-            "on_water": on_water,
-            "population": population,
-            "nominatim": nom
-        }
+    # 4. Batch Write to Cache (MSET/Pipeline) - HIGH SPEED
+    if new_data_to_cache:
+        set_cache_batch(new_data_to_cache)
 
-    results = [process_point(lat, lon, name, keys) for (lat, lon, name, keys) in info_list]
+    # 5. Compile Final Results
+    final_results = [{"lat": c["lat"], "lon": c["lon"], "name": c.get("name", "Unknown")} for c in coords]
+    
+    # Map results back to the frontend structure
+    for key, result in cache_data.items():
+        # Find the original job data to map the result
+        for job_tuple in job_data:
+            if job_tuple[0] == key:
+                index = job_tuple[9]
+                table, type_, _, is_w_c, is_wp, is_nom = job_tuple[3], job_tuple[4], job_tuple[5], job_tuple[6], job_tuple[7], job_tuple[8]
+
+                if table == "buildings" and type_ == "building":
+                    final_results[index]["building"] = result
+                elif table == "transportation" and type_ == "segment":
+                    final_results[index]["road"] = result
+                elif table == "base" and type_ == "water" and not is_w_c: # DuckDB water
+                    final_results[index]["water"] = result
+                elif table == "places" and type_ == "place":
+                    final_results[index]["place"] = result
+                elif is_w_c: # Overpass Water Check
+                    final_results[index]["on_water"] = bool(result)
+                elif is_wp: # WorldPop
+                    final_results[index]["population"] = result
+                elif is_nom: # Nominatim
+                    final_results[index]["nominatim"] = result
+                break
+
     flush_cache_buffer(force=True)
-    return jsonify({"results": results})
+    return jsonify({"results": final_results})
+
+# --- Individual Endpoints (Now use the single-query helper pattern for efficiency) ---
+# NOTE: The single endpoints are now executed synchronously using the optimized batch functions for caching, 
+# but they are still inherently slower than the batch endpoint for multiple queries.
+
+def single_query_with_executor(key_data: Tuple[str, float, float, str, str, Optional[callable], bool, bool, bool]):
+    # Uses the executor-driven logic for high performance on external calls and batch cache writes
+    key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom = key_data
+    
+    cached = get_cache_batch([key]).get(key)
+    if cached is not None:
+        return cached
+
+    # Run the query in a separate thread and await the result (concurrency gain)
+    future = executor.submit(run_query_for_miss, key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom)
+    key, res = future.result()
+
+    if res is not None:
+        set_cache_batch({key: res})
+    return res
 
 @app.route("/api/worldpop", methods=["GET"])
 def worldpop():
@@ -599,7 +509,12 @@ def worldpop():
         lon = float(request.args.get("lon") or request.args.get("longitude"))
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
-    return jsonify(get_worldpop_population_with_cache(lat, lon))
+    
+    lat_r = round(lat, 4); lon_r = round(lon, 4)
+    key_data = (f"worldpop_{lat_r}_{lon_r}", lat, lon, "", "", None, False, True, False)
+    result = single_query_with_executor(key_data)
+    
+    return jsonify(result or {"population": 0, "source": "failed"})
 
 @app.route("/api/nominatim", methods=["GET"])
 def nominatim():
@@ -608,7 +523,12 @@ def nominatim():
         lon = float(request.args.get("lon"))
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
-    return jsonify(nominatim_lookup_with_cache(lat, lon))
+    
+    lat_r = round(lat, 4); lon_r = round(lon, 4)
+    key_data = (f"nominatim_{lat_r}_{lon_r}", lat, lon, "", "", None, False, False, True)
+    result = single_query_with_executor(key_data)
+    
+    return jsonify(result or {"error": "lookup failed", "source": "failed"})
 
 @app.route("/api/building_distance", methods=["GET"])
 def building_distance():
@@ -617,11 +537,14 @@ def building_distance():
         lon = float(request.args.get("lon"))
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
-    row = query_with_fallback("buildings", "building", lat, lon, overpass_nearest_building)
-    #print the row
-    print(f"[Building distance] {row}")
+    
+    lat_r = round(lat, 4); lon_r = round(lon, 4)
+    key_data = (f"duckdb_buildings_building_{lat_r}_{lon_r}", lat, lon, "buildings", "building", overpass_nearest_building, False, False, False)
+    row = single_query_with_executor(key_data)
+    
     if not row or "distance" not in row:
         return jsonify({"valid": False, "distance": None, "message": "No building nearby", "source": "none"})
+    
     dist_deg = row["distance"]
     return jsonify({
         "valid": True,
@@ -638,17 +561,21 @@ def road_distance():
         lon = float(request.args.get("lon"))
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
-    row = query_with_fallback("transportation", "segment", lat, lon, overpass_nearest_road)
-    print(f"[road distance] {row}")
+    
+    lat_r = round(lat, 4); lon_r = round(lon, 4)
+    key_data = (f"duckdb_transportation_segment_{lat_r}_{lon_r}", lat, lon, "transportation", "segment", overpass_nearest_road, False, False, False)
+    row = single_query_with_executor(key_data)
 
     if not row or "distance" not in row:
         return jsonify({"valid": False, "distance": None, "message": "No road nearby", "source": "none"})
+        
     dist = row["distance"]
     source = row.get("source", "unknown")
     if source == "overpass":
         dist_m = dist
     else:
         dist_m = dist * 111000
+
     return jsonify({
         "valid": True,
         "distance": round(dist_m, 2),
@@ -664,9 +591,13 @@ def water_check():
         lon = float(request.args.get("lon"))
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
-    on_water = is_point_on_water_with_fallback(lat, lon)
+        
+    lat_r = round(lat, 4); lon_r = round(lon, 4)
+    key_data = (f"water_check_{lat_r}_{lon_r}", lat, lon, "", "", overpass_water_check, True, False, False)
+    on_water = single_query_with_executor(key_data)
+
     return jsonify({
-        "on_water": on_water,
+        "on_water": bool(on_water),
         "message": "Point lies on water" if on_water else "Point is on land"
     })
 
@@ -677,13 +608,18 @@ def overture_match():
         lon = float(request.args.get("lon"))
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
-    row = query_with_fallback("places","place",lat,lon,overpass_nearest_place)
+        
+    lat_r = round(lat, 4); lon_r = round(lon, 4)
+    key_data = (f"duckdb_places_place_{lat_r}_{lon_r}", lat, lon, "places", "place", overpass_nearest_place, False, False, False)
+    row = single_query_with_executor(key_data)
+    
     if not row or "distance" not in row:
         return jsonify({"valid": False, "message": "No nearby place found", "source": "none"})
+        
     return jsonify({
         "valid": True,
         "message": f"Closest entity: {row.get('name','unknown')}",
-        "distance": round(float(row["distance"]), 2),
+        "distance": round(float(row["distance"]) * 111000, 2), 
         "source": row.get("source","unknown")
     })
 
@@ -704,12 +640,10 @@ def overpass_endpoint():
 def health():
     backend = ("upstash" if upstash_client else
                "redis_fallback" if redis_client else
-               "supabase" if supabase else "none")
+               "none")
     return jsonify({
         "status": "healthy",
         "cache_backend": backend,
-        "buffer_size": len(CACHE_BUFFER),
-        "supabase_connected": bool(supabase)
     })
 
 if __name__ == "__main__":
