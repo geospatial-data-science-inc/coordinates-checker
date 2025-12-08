@@ -510,15 +510,21 @@ def point_to_geojson(lat, lon, delta=0.01):
     }
 
 
+
 def get_worldpop_population_with_cache(lat, lon):
-    """WorldPop with optimized caching."""
+    """WorldPop with optimized caching - don't cache failed responses."""
     lat_r = round(lat, 4)
     lon_r = round(lon, 4)
     cache_key = f"worldpop_{lat_r}_{lon_r}"
     
     cached_result = get_cache(cache_key)
     if cached_result is not None:
-        return cached_result
+        # Check if cached result is valid (not a failed response)
+        if isinstance(cached_result, dict) and cached_result.get("source") == "failed":
+            # Don't return cached failed response - fetch fresh data
+            print(f"[WorldPop] Skipping cached failed response for {lat_r},{lon_r}")
+        else:
+            return cached_result
     
     geojson = json.dumps({
         "type": "FeatureCollection",
@@ -542,14 +548,21 @@ def get_worldpop_population_with_cache(lat, lon):
         data = r.json()
         population = data.get("data", {}).get("total_population", 0)
         result = {"population": population, "source": "worldpop"}
+        
+        # Only cache successful responses
+        if population > 0:
+            set_cache(cache_key, result)
+        else:
+            # Don't cache zero population or failed responses
+            print(f"[WorldPop] Not caching zero/error result for {lat_r},{lon_r}")
+            
     except Exception as e:
         print(f"[WorldPop error] {e}")
         result = {"population": 0, "error": "WorldPop request failed", "source": "failed"}
+        # Don't cache failed responses
+        print(f"[WorldPop] Not caching failed response for {lat_r},{lon_r}")
     
-    set_cache(cache_key, result)
     return result
-
-
 # -----------------------------
 # Nominatim with caching and rate-limiting
 last_nominatim_call = 0
