@@ -172,30 +172,26 @@ def get_cache(key: str):
 
 
 def set_cache_batch(data: Dict[str, Any]):
-    """Writes multiple key/value pairs using pipeline for efficiency (Batch Write)."""
-    if not data: return
+    """
+    Write many cache entries into Upstash.
+    Uses mset (atomic multi write) + expire for TTL.
+    """
+    if not upstash_client or not data:
+        return
 
-    packed_data = {k: pack(v) for k, v in data.items()}
+    try:
+        # 1) Encode values
+        mset_payload = {k: pack(v) for k, v in data.items()}
 
-    # 1. Try Upstash (Pipeline SETEX)
-    if upstash_client:
-        try:
-            pipe = upstash_client.pipeline()
-            for k, v in packed_data.items():
-                pipe.setex(k, CACHE_TTL, v)
-            pipe.execute()
-        except Exception as e:
-            print(f"[Upstash batch set error] {e}")
-            
-    # 2. Redis fallback (Pipeline SETEX)
-    if redis_client:
-        try:
-            pipe = redis_client.pipeline()
-            for k, v in packed_data.items():
-                pipe.setex(k, CACHE_TTL, v)
-            pipe.execute()
-        except Exception as e:
-            print(f"[Redis batch set error] {e}")
+        # 2) Write them all at once
+        upstash_client.mset(mset_payload)
+
+        # 3) Set TTL for each key
+        for k in mset_payload.keys():
+            upstash_client.expire(k, CACHE_TTL)
+
+    except Exception as e:
+        print("[Upstash] write error:", e)
 
 # NOTE: set_cache is eliminated in the optimal path, but preserved for compatibility
 def set_cache(key: str, value: any):
