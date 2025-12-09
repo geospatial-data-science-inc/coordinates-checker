@@ -194,14 +194,12 @@ const countryAlpha2Map = {
 };
 
 const API_CONFIG = {
-  worldpop: "https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: "https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: "https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    "https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    "https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: "https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: "http://localhost:5000/api/worldpop",
+  nominatim: "http://localhost:5000/api/nominatim",
+  overture: "http://localhost:5000/api/overture_match",
+  road_distance: "http://localhost:5000/api/road_distance",
+  building_distance: "http://localhost:5000/api/building_distance",
+  water_check: "http://localhost:5000/api/water_check",
 };
 
 document
@@ -556,6 +554,7 @@ async function runApiCheck(
             checkType,
             facility
           );
+          console.log("api call", countryData);
 
           const country = document.getElementById("countrySelect").value;
           const expectedCountry = countryAlpha2Map[country];
@@ -665,6 +664,7 @@ async function runApiCheck(
             checkType,
             facility
           );
+          console.log("road data call", roadData);
 
           facility.roadDistance = {
             valid: roadData.valid || false,
@@ -901,7 +901,7 @@ async function retryFailedChecks() {
   }
 
   // Process checks in batches
-  const batchSize = 5;
+  const batchSize = 10;
   let processedChecks = 0;
 
   for (let i = 0; i < checksToRetry.length; i += batchSize) {
@@ -1071,7 +1071,7 @@ async function validateCoordinates() {
   totalTimerInterval = setInterval(updateTotalElapsedTime, 1000);
 
   const results = [];
-  const batchSize = 5;
+  const batchSize = 10;
 
   // Show progress section
   document.getElementById("progressSection").style.display = "block";
@@ -1230,15 +1230,17 @@ function updateMap(results) {
               f.duplicateCheck?.valid ? "No" : "Yes"
             }</p>
             <p style="margin: 0 0 5px 0;"><strong>Road Distance:</strong> ${
-              f.roadDistance?.distance !== null
-                ? f.roadDistance?.distance.toFixed(2)
+              f.roadDistance?.distance !== null &&
+              f.roadDistance?.distance !== undefined
+                ? f.roadDistance?.distance?.toFixed(2)
                 : "N/A"
             }</p>
             <p style="margin: 0 0 5px 0;"><strong>Building Distance:</strong> ${
-              f.buildingDistance?.distance !== null
-                ? f.buildingDistance?.distance.toFixed(2) < 1
+              f.buildingDistance?.distance !== null &&
+              f.buildingDistance?.distance !== undefined
+                ? f.buildingDistance?.distance?.toFixed(2) < 1
                   ? "At location"
-                  : f.buildingDistance?.distance.toFixed(2)
+                  : f.buildingDistance?.distance?.toFixed(2)
                 : "N/A"
             }</p>
             <p style="margin: 0 0 5px 0;">
