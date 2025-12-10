@@ -137,7 +137,9 @@ def get_cache_batch_raw(keys: List[str]) -> Dict[str, any]:
             for k, v in zip(keys, vals):
                 if v is not None:
                     # Unpack raw value immediately to match original control flow
-                    results[k] = unpack(v) 
+                    results[k] = unpack(v)
+                    print(f"[Upstash batch get] key: {k} retrieved")
+                    print(f"[Upstash batch get] unpacked value: {results[k]}")
         except Exception as e:
             print(f"[Upstash batch get error] {e}")
 
@@ -441,8 +443,14 @@ def validate_batch():
     for future in missed_jobs_futures:
         key, result = future.result() 
         cache_data[key] = result # Overwrite the cache_data with the new result
-        if result is not None:
-            new_data_to_cache[key] = result
+        # Only cache successful WorldPop results
+        if is_wp:
+            if result and result.get("source") == "worldpop":
+                new_data_to_cache[key] = result
+        else:
+            if result is not None:
+                new_data_to_cache[key] = result
+
 
     # 4. Batch Write to Cache (MSET/Pipeline) - HIGH SPEED
     if new_data_to_cache:
@@ -494,8 +502,13 @@ def single_query_with_executor(key_data: Tuple[str, float, float, str, str, Opti
     future = executor.submit(run_query_for_miss, key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom)
     key, res = future.result()
 
-    if res is not None:
-        set_cache_batch({key: res})
+    if is_wp:
+        if res and res.get("source") == "worldpop":  
+            set_cache_batch({key: res})
+    else:
+        if res is not None:
+            set_cache_batch({key: res})
+
     return res
 
 @app.route("/api/worldpop", methods=["GET"])
