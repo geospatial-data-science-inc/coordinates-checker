@@ -157,6 +157,11 @@ const map = L.map("map", {
   scrollWheelZoom: true,
 });
 
+L.control.fullscreen({ position: "topleft" }).addTo(map);
+map.on("fullscreenchange", function () {
+  map.invalidateSize();
+});
+
 const baseMaps = {
   "Street Map": streetLayer,
   Satellite: satelliteLayer,
