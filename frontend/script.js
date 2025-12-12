@@ -85,10 +85,6 @@ function formatTime(sec) {
   return `${m}m ${s}s`;
 }
 
-// Track ALL failed checks (both validation failures and API failures)
-let failedChecks = {};
-let isRetrying = false;
-
 $(document).ready(function () {
   window.resultsTable = $("#resultsTable").DataTable({
     searchPanes: { cascadePanes: true, viewTotal: true },
@@ -108,16 +104,6 @@ $(document).ready(function () {
         className: "btn btn-info btn-sm",
         action: function (e, dt, node, config) {
           downloadOriginalDataset();
-        },
-      },
-      {
-        text: '<i class="fas fa-redo me-1"></i> Retry Failed',
-        className: "btn btn-warning btn-sm",
-        action: function (e, dt, node, config) {
-          retryFailedChecks();
-        },
-        attr: {
-          id: "retryBtn",
         },
       },
       {
@@ -194,12 +180,14 @@ const countryAlpha2Map = {
 };
 
 const API_CONFIG = {
-  worldpop: "http://localhost:5000/api/worldpop",
-  nominatim: "http://localhost:5000/api/nominatim",
-  overture: "http://localhost:5000/api/overture_match",
-  road_distance: "http://localhost:5000/api/road_distance",
-  building_distance: "http://localhost:5000/api/building_distance",
-  water_check: "http://localhost:5000/api/water_check",
+  worldpop: "https://coordinates-checker-dc59.onrender.com/api/worldpop",
+  nominatim: "https://coordinates-checker-dc59.onrender.com/api/nominatim",
+  overture: "https://coordinates-checker-dc59.onrender.com/api/overture_match",
+  road_distance:
+    "https://coordinates-checker-dc59.onrender.com/api/road_distance",
+  building_distance:
+    "https://coordinates-checker-dc59.onrender.com/api/building_distance",
+  water_check: "https://coordinates-checker-dc59.onrender.com/api/water_check",
 };
 
 document
@@ -343,15 +331,11 @@ function createProgressCard(facility, index) {
   return card;
 }
 
-function updateCheckStatus(index, checkName, status, isApiError = false) {
+function updateCheckStatus(index, checkName, status) {
   const checkEl = document.getElementById(`check-${checkName}-${index}`);
   if (!checkEl) return;
 
   checkEl.className = `api-check check-${status}`;
-  if (isApiError) {
-    checkEl.classList.add("api-error");
-  }
-
   const icon =
     status === "loading"
       ? '<span class="spinner-icon"><i class="fas fa-spinner fa-spin"></i></span>'
@@ -376,8 +360,6 @@ function updateFacilityStatus(index, status, message = "") {
       ? "Complete"
       : status === "error"
       ? "Error"
-      : status === "retrying"
-      ? "Retrying..."
       : "Processing...");
 }
 
@@ -430,518 +412,235 @@ function determineFacilityCategory(f) {
   return "Valid";
 }
 
-// Function to add failed check to tracking (both validation failures and API failures)
-function addFailedCheck(
-  facilityIndex,
-  checkType,
-  facility,
-  failureType = "validation"
-) {
-  if (!failedChecks[facilityIndex]) {
-    failedChecks[facilityIndex] = {};
-  }
+// --- Core validation with progress tracking ---
+async function validateCoordinates() {
+  startTime = Date.now();
+  if (totalTimerInterval) clearInterval(totalTimerInterval);
+  totalTimerInterval = setInterval(updateTotalElapsedTime, 1000);
 
-  if (!failedChecks[facilityIndex][checkType]) {
-    failedChecks[facilityIndex][checkType] = {
-      facility: facility,
-      retryCount: 0,
-      maxRetries: 3,
-      failureType: failureType, // 'validation' or 'api'
-    };
-    updateRetryButton();
-  }
-}
-
-// Function to remove failed check from tracking
-function removeFailedCheck(facilityIndex, checkType) {
-  if (failedChecks[facilityIndex] && failedChecks[facilityIndex][checkType]) {
-    delete failedChecks[facilityIndex][checkType];
-
-    // If no more failed checks for this facility, remove the facility entry
-    if (Object.keys(failedChecks[facilityIndex]).length === 0) {
-      delete failedChecks[facilityIndex];
-    }
-
-    updateRetryButton();
-  }
-}
-
-// Function to update retry button state
-function updateRetryButton() {
-  const retryBtn = document.getElementById("retryBtn");
-  const totalFailedChecks = countFailedChecks();
-
-  if (retryBtn) {
-    if (totalFailedChecks > 0) {
-      retryBtn.disabled = false;
-      retryBtn.innerHTML = `<i class="fas fa-redo me-1"></i> Retry Failed (${totalFailedChecks})`;
-    } else {
-      retryBtn.disabled = true;
-      retryBtn.innerHTML = `<i class="fas fa-redo me-1"></i> Retry Failed`;
-    }
-  }
-}
-
-// Count total failed checks
-function countFailedChecks() {
-  let total = 0;
-  for (const facilityIndex in failedChecks) {
-    total += Object.keys(failedChecks[facilityIndex]).length;
-  }
-  return total;
-}
-
-// Generic API call with retry logic
-async function makeApiCall(url, facilityIndex, checkType, facility) {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error(
-      `API call failed for ${checkType} check (facility ${facilityIndex}):`,
-      error
-    );
-
-    // Add to failed checks tracking as API failure
-    addFailedCheck(facilityIndex, checkType, facility, "api");
-
-    throw error;
-  }
-}
-
-// Check if a validation result is considered a "failure" for retry purposes
-function isValidationFailure(checkType, result) {
-  switch (checkType) {
-    case "country":
-      return !result.valid; // Wrong country
-    case "admin":
-      return !result.valid; // Admin mismatch
-    case "road":
-      return !result.valid; // No road nearby
-    case "building":
-      return !result.valid; // No building nearby
-    case "water":
-      return result.on_water; // On water
-    case "population":
-      return !result.valid; // Low population
-    default:
-      return false;
-  }
-}
-
-// Function to run a single API check and track failures
-async function runApiCheck(
-  facility,
-  facilityIndex,
-  checkType,
-  isRetry = false
-) {
-  const x = parseFloat(facility.x);
-  const y = parseFloat(facility.y);
-  let apiErrorOccurred = false;
-
-  try {
-    switch (checkType) {
-      case "country":
-        updateCheckStatus(facilityIndex, checkType, "loading");
-        try {
-          const countryData = await makeApiCall(
-            `${API_CONFIG.nominatim}?lat=${y}&lon=${x}&format=json&addressdetails=1`,
-            facilityIndex,
-            checkType,
-            facility
-          );
-          console.log("api call", countryData);
-
-          const country = document.getElementById("countrySelect").value;
-          const expectedCountry = countryAlpha2Map[country];
-          facility.countryBoundary = {
-            valid: countryData.address?.country_code === expectedCountry,
-            message: countryData.address?.country || "Unknown",
-            countryCode: countryData.address?.country_code || "",
-            countryName: countryData.address?.country || "",
-          };
-
-          // Store country data for admin check
-          facility._countryData = countryData;
-
-          // Track validation failure if country doesn't match
-          if (isValidationFailure(checkType, facility.countryBoundary)) {
-            addFailedCheck(facilityIndex, checkType, facility, "validation");
-          }
-
-          updateCheckStatus(
-            facilityIndex,
-            checkType,
-            facility.countryBoundary.valid ? "success" : "failed"
-          );
-        } catch (error) {
-          apiErrorOccurred = true;
-          facility.countryBoundary = {
-            valid: false,
-            message: "API Error",
-            countryCode: "",
-            countryName: "",
-          };
-          updateCheckStatus(facilityIndex, checkType, "failed", true);
-        }
-        break;
-
-      case "admin":
-        updateCheckStatus(facilityIndex, checkType, "loading");
-        try {
-          // First ensure we have country data
-          if (!facility._countryData) {
-            // If country check failed, admin check will also fail
-            facility.adminAreaMatch = {
-              valid: false,
-              message: "Country data missing",
-              osmAdminName: "",
-              uploadedAdminName: facility.Admin1 || "",
-              matchStatus: "error",
-            };
-            updateCheckStatus(facilityIndex, checkType, "failed", true);
-            addFailedCheck(facilityIndex, checkType, facility, "api");
-            break;
-          }
-
-          const address = facility._countryData.address || {};
-          const osmAdmin1 =
-            address?.region ||
-            address?.state ||
-            address?.province ||
-            address?.department ||
-            address?.county ||
-            address["ISO3166-2-lvl3"]?.split("-")[1] ||
-            address["ISO3166-2-lvl4"]?.split("-")[1] ||
-            "";
-
-          const osmAdmin1Normalized = normalize(osmAdmin1);
-          const admin1 = normalize(facility.Admin1 || "");
-          const admin1Match = isSimilar(admin1, osmAdmin1Normalized);
-
-          facility.adminAreaMatch = {
-            valid: admin1Match,
-            message: admin1Match ? "Admin1 matches" : "Admin1 mismatch",
-            osmAdminName: osmAdmin1,
-            uploadedAdminName: facility.Admin1 || "",
-            matchStatus: admin1Match ? "match" : "mismatch",
-            addressFields: address,
-          };
-
-          // Track validation failure if admin doesn't match
-          if (isValidationFailure(checkType, facility.adminAreaMatch)) {
-            addFailedCheck(facilityIndex, checkType, facility, "validation");
-          }
-
-          updateCheckStatus(
-            facilityIndex,
-            checkType,
-            admin1Match ? "success" : "failed"
-          );
-        } catch (error) {
-          apiErrorOccurred = true;
-          facility.adminAreaMatch = {
-            valid: false,
-            message: "API Error",
-            osmAdminName: "",
-            uploadedAdminName: facility.Admin1 || "",
-            matchStatus: "error",
-          };
-          updateCheckStatus(facilityIndex, checkType, "failed", true);
-        }
-        break;
-
-      case "road":
-        updateCheckStatus(facilityIndex, checkType, "loading");
-        try {
-          const roadData = await makeApiCall(
-            `${API_CONFIG.road_distance}?lat=${y}&lon=${x}`,
-            facilityIndex,
-            checkType,
-            facility
-          );
-          console.log("road data call", roadData);
-
-          facility.roadDistance = {
-            valid: roadData.valid || false,
-            distance:
-              roadData.distance !== undefined ? roadData.distance : null,
-            message: roadData.message || "No road nearby",
-          };
-
-          // Track validation failure if no road nearby
-          if (isValidationFailure(checkType, facility.roadDistance)) {
-            addFailedCheck(facilityIndex, checkType, facility, "validation");
-          }
-
-          updateCheckStatus(
-            facilityIndex,
-            checkType,
-            roadData.valid ? "success" : "failed"
-          );
-        } catch (error) {
-          apiErrorOccurred = true;
-          facility.roadDistance = {
-            valid: false,
-            distance: null,
-            message: "API Error",
-          };
-          updateCheckStatus(facilityIndex, checkType, "failed", true);
-        }
-        break;
-
-      case "building":
-        updateCheckStatus(facilityIndex, checkType, "loading");
-        try {
-          const buildData = await makeApiCall(
-            `${API_CONFIG.building_distance}?lat=${y}&lon=${x}`,
-            facilityIndex,
-            checkType,
-            facility
-          );
-
-          facility.buildingDistance = {
-            valid: buildData.valid || false,
-            distance:
-              buildData.distance !== undefined ? buildData.distance : null,
-            message: buildData.message || "No building nearby",
-          };
-
-          // Track validation failure if no building nearby
-          if (isValidationFailure(checkType, facility.buildingDistance)) {
-            addFailedCheck(facilityIndex, checkType, facility, "validation");
-          }
-
-          updateCheckStatus(
-            facilityIndex,
-            checkType,
-            buildData.valid ? "success" : "failed"
-          );
-        } catch (error) {
-          apiErrorOccurred = true;
-          facility.buildingDistance = {
-            valid: false,
-            distance: null,
-            message: "API Error",
-          };
-          updateCheckStatus(facilityIndex, checkType, "failed", true);
-        }
-        break;
-
-      case "water":
-        updateCheckStatus(facilityIndex, checkType, "loading");
-        try {
-          const waterData = await makeApiCall(
-            `${API_CONFIG.water_check}?lat=${y}&lon=${x}`,
-            facilityIndex,
-            checkType,
-            facility
-          );
-
-          const onWater = waterData.on_water || false;
-          facility.waterCheck = {
-            on_water: onWater,
-            message: onWater ? "On water body" : "Not on water",
-          };
-
-          // Track validation failure if on water
-          if (isValidationFailure(checkType, facility.waterCheck)) {
-            addFailedCheck(facilityIndex, checkType, facility, "validation");
-          }
-
-          updateCheckStatus(
-            facilityIndex,
-            checkType,
-            !onWater ? "success" : "failed"
-          );
-        } catch (error) {
-          apiErrorOccurred = true;
-          facility.waterCheck = {
-            on_water: false,
-            message: "API Error",
-          };
-          updateCheckStatus(facilityIndex, checkType, "failed", true);
-        }
-        break;
-
-      case "population":
-        updateCheckStatus(facilityIndex, checkType, "loading");
-        try {
-          const popData = await makeApiCall(
-            `${API_CONFIG.worldpop}?latitude=${y}&longitude=${x}`,
-            facilityIndex,
-            checkType,
-            facility
-          );
-
-          const population = popData.population || 0;
-          facility.populationDensity = {
-            valid: population > 100,
-            population,
-            message: `Population ~1km: ${population}`,
-          };
-
-          // Track validation failure if low population
-          if (isValidationFailure(checkType, facility.populationDensity)) {
-            addFailedCheck(facilityIndex, checkType, facility, "validation");
-          }
-
-          updateCheckStatus(
-            facilityIndex,
-            checkType,
-            facility.populationDensity.valid ? "success" : "failed"
-          );
-        } catch (error) {
-          apiErrorOccurred = true;
-          facility.populationDensity = {
-            valid: false,
-            population: 0,
-            message: "API Error",
-          };
-          updateCheckStatus(facilityIndex, checkType, "failed", true);
-        }
-        break;
-    }
-
-    // If this was a retry and succeeded, remove from failed checks
-    if (isRetry && !apiErrorOccurred) {
-      // Check if the validation is now successful
-      let isNowSuccessful = false;
-
-      switch (checkType) {
-        case "country":
-          isNowSuccessful = facility.countryBoundary?.valid;
-          break;
-        case "admin":
-          isNowSuccessful = facility.adminAreaMatch?.valid;
-          break;
-        case "road":
-          isNowSuccessful = facility.roadDistance?.valid;
-          break;
-        case "building":
-          isNowSuccessful = facility.buildingDistance?.valid;
-          break;
-        case "water":
-          isNowSuccessful = !facility.waterCheck?.on_water;
-          break;
-        case "population":
-          isNowSuccessful = facility.populationDensity?.valid;
-          break;
-      }
-
-      if (
-        isNowSuccessful &&
-        failedChecks[facilityIndex] &&
-        failedChecks[facilityIndex][checkType]
-      ) {
-        removeFailedCheck(facilityIndex, checkType);
-      }
-    }
-  } catch (error) {
-    console.error(
-      `Error in ${checkType} check for facility ${facilityIndex}:`,
-      error
-    );
-  }
-}
-
-// Main retry function for failed checks
-async function retryFailedChecks() {
-  if (isRetrying || countFailedChecks() === 0) return;
-
-  isRetrying = true;
-
-  // Create retry progress section if it doesn't exist
-  if (!document.getElementById("retryProgressSection")) {
-    const progressSection = document.getElementById("progressSection");
-    const retryProgressHTML = `
-      <div id="retryProgressSection" style="margin-top: 20px; display: none;">
-        <div class="section-title">
-          <h4><i class="fas fa-redo me-2"></i>Retry Failed Checks</h4>
-          <div class="progress" style="height: 10px;">
-            <div id="retryProgressBar" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
-          </div>
-          <div class="d-flex justify-content-between mt-1">
-            <small id="retryProgressText">0 / 0 checks</small>
-            <small id="retryProgressPercent">0%</small>
-          </div>
-        </div>
-      </div>
-    `;
-    progressSection.insertAdjacentHTML("beforeend", retryProgressHTML);
-  }
-
-  // Show retry progress
-  const retryProgressSection = document.getElementById("retryProgressSection");
-  retryProgressSection.style.display = "block";
-
-  // Update retry button to show processing
-  const retryBtn = document.getElementById("retryBtn");
-  retryBtn.innerHTML = `<i class="fas fa-spinner fa-spin me-1"></i> Retrying...`;
-  retryBtn.disabled = true;
-
-  const totalChecksToRetry = countFailedChecks();
-  updateApiStatus(`Retrying ${totalChecksToRetry} failed checks...`, "warning");
-
-  // Collect all checks to retry
-  const checksToRetry = [];
-  for (const facilityIndex in failedChecks) {
-    for (const checkType in failedChecks[facilityIndex]) {
-      checksToRetry.push({
-        facilityIndex: parseInt(facilityIndex),
-        checkType: checkType,
-        facility: failedChecks[facilityIndex][checkType].facility,
-        failureType: failedChecks[facilityIndex][checkType].failureType,
-      });
-    }
-  }
-
-  // Process checks in batches
+  const country = document.getElementById("countrySelect").value;
+  const results = [];
   const batchSize = 10;
-  let processedChecks = 0;
 
-  for (let i = 0; i < checksToRetry.length; i += batchSize) {
-    const batch = checksToRetry.slice(
-      i,
-      Math.min(i + batchSize, checksToRetry.length)
+  // Show progress section
+  document.getElementById("progressSection").style.display = "block";
+  document.getElementById("overallProgress").style.display = "block";
+  const tracker = document.getElementById("progressTracker");
+  tracker.innerHTML = "";
+
+  // Create progress cards for all facilities
+  uploadedData.forEach((f, i) => {
+    tracker.appendChild(createProgressCard(f, i));
+  });
+
+  async function validateSingleFacility(f, index, total) {
+    startFacilityTimer(index);
+    const x = parseFloat(f.x),
+      y = parseFloat(f.y);
+    updateApiStatus(
+      `Validating facility ${index + 1}/${total}: ${f.Name}`,
+      "info"
     );
 
-    const batchPromises = batch.map((check) =>
-      runApiCheck(check.facility, check.facilityIndex, check.checkType, true)
-    );
+    try {
+      // Country check
+      updateCheckStatus(index, "country", "loading");
+      try {
+        const countryResp = await fetch(
+          `${API_CONFIG.nominatim}?lat=${y}&lon=${x}&format=json&addressdetails=1`
+        );
+        countryData = await countryResp.json();
+        const expectedCountry = countryAlpha2Map[country];
+        f.countryBoundary = {
+          valid: countryData.address?.country_code === expectedCountry,
+          message: countryData.address?.country || "Unknown",
+          countryCode: countryData.address?.country_code || "",
+          countryName: countryData.address?.country || "",
+        };
+        updateCheckStatus(
+          index,
+          "country",
+          f.countryBoundary.valid ? "success" : "failed"
+        );
+      } catch (e) {
+        f.countryBoundary = {
+          valid: false,
+          message: "Country check failed",
+          countryCode: "",
+          countryName: "",
+        };
+        updateCheckStatus(index, "country", "failed");
+      }
 
-    await Promise.allSettled(batchPromises);
+      // Update the Admin1 check section in the validateSingleFacility function:
 
-    // Update progress
-    processedChecks = Math.min(i + batchSize, checksToRetry.length);
-    const percent = Math.round((processedChecks / checksToRetry.length) * 100);
-    document.getElementById(
-      "retryProgressText"
-    ).textContent = `${processedChecks} / ${checksToRetry.length} checks`;
-    document.getElementById("retryProgressPercent").textContent = `${percent}%`;
-    document.getElementById("retryProgressBar").style.width = `${percent}%`;
+      // --- Admin1 check ---
+      updateCheckStatus(index, "admin", "loading");
+      try {
+        // Extract admin1 name from Nominatim response - handle different field names
+        const address = countryData?.address || {};
 
-    // Small delay between batches
-    if (i + batchSize < checksToRetry.length) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-  }
+        // Try different possible field names for Admin1 level
+        const osmAdmin1 =
+          address?.region || // Alternative
+          address?.state || // Most common
+          address?.province || // Some countries use province
+          address?.department || // Some countries use department
+          address?.county || // Some countries use county
+          address["ISO3166-2-lvl3"]?.split("-")[1] || // ISO code
+          address["ISO3166-2-lvl4"]?.split("-")[1] || // Alternative ISO code
+          "";
 
-  // Recalculate category for facilities that had checks retried
-  const updatedFacilities = new Set();
-  for (const check of checksToRetry) {
-    const facility = uploadedData[check.facilityIndex];
-    if (facility) {
-      facility.category = determineFacilityCategory(facility);
-      updatedFacilities.add(check.facilityIndex);
+        const osmAdmin1Normalized = normalize(osmAdmin1);
+        const admin1 = normalize(f.Admin1 || "");
+        const admin1Match = isSimilar(admin1, osmAdmin1Normalized);
+        const msg = admin1Match ? "Admin1 matches" : "Admin1 mismatch";
 
-      // Update facility status
+        f.adminAreaMatch = {
+          valid: admin1Match,
+          message: msg,
+          osmAdminName: osmAdmin1, // Store the actual name from server
+          uploadedAdminName: f.Admin1 || "", // Store the uploaded name
+          matchStatus: admin1Match ? "match" : "mismatch",
+          addressFields: address, // Store all address fields for debugging
+        };
+
+        updateCheckStatus(index, "admin", admin1Match ? "success" : "failed");
+      } catch (e) {
+        console.error("Admin1 check failed", e);
+        f.adminAreaMatch = {
+          valid: false,
+          message: "Admin1 check failed",
+          osmAdminName: "",
+          uploadedAdminName: f.Admin1 || "",
+          matchStatus: "error",
+        };
+        updateCheckStatus(index, "admin", "failed");
+      }
+
+      // Duplicate check (instant, no API)
+      const threshold = 0.001;
+      const duplicates = uploadedData.filter(
+        (o, i) =>
+          i !== index &&
+          Math.abs(parseFloat(o.x) - x) < threshold &&
+          Math.abs(parseFloat(o.y) - y) < threshold
+      );
+      f.duplicateCheck = {
+        valid: duplicates.length === 0,
+        message:
+          duplicates.length === 0
+            ? "No duplicates"
+            : `${duplicates.length} duplicates`,
+        duplicateCount: duplicates.length,
+      };
+
+      // Road distance
+      updateCheckStatus(index, "road", "loading");
+      try {
+        const roadResp = await fetch(
+          `${API_CONFIG.road_distance}?lat=${y}&lon=${x}`
+        );
+        const roadData = await roadResp.json();
+        console.log("road", roadData);
+        f.roadDistance = {
+          valid: roadData.valid || false,
+          distance: roadData.distance !== undefined ? roadData.distance : null,
+          message: roadData.message || "No road nearby",
+        };
+        updateCheckStatus(index, "road", roadData.valid ? "success" : "failed");
+      } catch (e) {
+        f.roadDistance = {
+          valid: false,
+          distance: null,
+          message: "Road distance failed",
+        };
+        updateCheckStatus(index, "road", "failed");
+      }
+
+      // Building distance
+      updateCheckStatus(index, "building", "loading");
+      try {
+        const buildResp = await fetch(
+          `${API_CONFIG.building_distance}?lat=${y}&lon=${x}`
+        );
+        const buildData = await buildResp.json();
+        f.buildingDistance = {
+          valid: buildData.valid || false,
+          distance:
+            buildData.distance !== undefined ? buildData.distance : null,
+          message: buildData.message || "No building nearby",
+        };
+        updateCheckStatus(
+          index,
+          "building",
+          buildData.valid ? "success" : "failed"
+        );
+      } catch (e) {
+        f.buildingDistance = {
+          valid: false,
+          distance: null,
+          message: "Building distance failed",
+        };
+        updateCheckStatus(index, "building", "failed");
+      }
+
+      // Water check - FIXED: Store both valid and on_water properties
+      updateCheckStatus(index, "water", "loading");
+      try {
+        const waterResp = await fetch(
+          `${API_CONFIG.water_check}?lat=${y}&lon=${x}`
+        );
+        const waterData = await waterResp.json();
+        const onWater = waterData.on_water || false;
+        f.waterCheck = {
+          on_water: onWater,
+          message: onWater ? "On water body" : "Not on water",
+        };
+        updateCheckStatus(index, "water", !onWater ? "success" : "failed");
+      } catch (e) {
+        f.waterCheck = {
+          on_water: false,
+          message: "Water check failed",
+        };
+        updateCheckStatus(index, "water", "failed");
+      }
+
+      // Population check
+      updateCheckStatus(index, "population", "loading");
+      try {
+        const popResp = await fetch(
+          `${API_CONFIG.worldpop}?latitude=${y}&longitude=${x}`
+        );
+        const popData = await popResp.json();
+        const population = popData.population || 0;
+
+        f.populationDensity = {
+          valid: population > 100,
+          population,
+          message: `Population ~1km: ${population}`,
+        };
+
+        updateCheckStatus(
+          index,
+          "population",
+          f.populationDensity.valid ? "success" : "failed"
+        );
+      } catch (e) {
+        f.populationDensity = {
+          valid: false,
+          population: 0,
+          message: "Population check failed",
+        };
+        updateCheckStatus(index, "population", "failed");
+      }
+
+      // Determine category instead of score
+      f.category = determineFacilityCategory(f);
+
+      // Set status message based on category
       let statusMessage = "";
-      switch (facility.category) {
+      switch (f.category) {
         case "Invalid":
           statusMessage = "Invalid (Country/Water issue)";
           break;
@@ -955,162 +654,42 @@ async function retryFailedChecks() {
           statusMessage = "Valid";
           break;
         default:
-          statusMessage = facility.category;
+          statusMessage = f.category;
       }
-      updateFacilityStatus(check.facilityIndex, "complete", statusMessage);
+
+      updateFacilityStatus(index, "complete", statusMessage);
+      stopFacilityTimer(index);
+      return f;
+    } catch (error) {
+      console.error(`Error validating facility ${index}:`, error);
+      updateFacilityStatus(index, "error", "Validation failed");
+      stopFacilityTimer(index);
+
+      // Return facility with error flag
+      f.error = true;
+      f.category = "Error";
+      return f;
     }
   }
 
-  // Update UI with results
-  updateStatsFromResults(uploadedData);
-  updateResultsTable(uploadedData);
-
-  // Update retry button
-  isRetrying = false;
-  updateRetryButton();
-
-  const remainingFailedChecks = countFailedChecks();
-  if (remainingFailedChecks === 0) {
-    updateApiStatus("All retries completed successfully!", "success");
-    retryProgressSection.style.display = "none";
-  } else {
-    updateApiStatus(
-      `Retry completed. ${remainingFailedChecks} checks still failed.`,
-      "warning"
-    );
-    retryBtn.innerHTML = `<i class="fas fa-redo me-1"></i> Retry Failed (${remainingFailedChecks})`;
-    retryBtn.disabled = false;
-  }
-}
-
-// Enhanced validateSingleFacility function
-async function validateSingleFacility(f, index, total) {
-  startFacilityTimer(index);
-
-  updateApiStatus(
-    `Validating facility ${index + 1}/${total}: ${f.Name}`,
-    "info"
-  );
-
-  try {
-    // Run all API checks
-    const checkTypes = [
-      "country",
-      "admin",
-      "road",
-      "building",
-      "water",
-      "population",
-    ];
-
-    // Run checks sequentially to ensure dependencies (admin needs country data)
-    for (const checkType of checkTypes) {
-      await runApiCheck(f, index, checkType, false);
-    }
-
-    // Duplicate check (no API call needed)
-    const x = parseFloat(f.x);
-    const y = parseFloat(f.y);
-    const threshold = 0.001;
-    const duplicates = uploadedData.filter(
-      (o, i) =>
-        i !== index &&
-        Math.abs(parseFloat(o.x) - x) < threshold &&
-        Math.abs(parseFloat(o.y) - y) < threshold
-    );
-    f.duplicateCheck = {
-      valid: duplicates.length === 0,
-      message:
-        duplicates.length === 0
-          ? "No duplicates"
-          : `${duplicates.length} duplicates`,
-      duplicateCount: duplicates.length,
-    };
-
-    // Determine category
-    f.category = determineFacilityCategory(f);
-
-    // Set status message
-    let statusMessage = "";
-    switch (f.category) {
-      case "Invalid":
-        statusMessage = "Invalid (Country/Water issue)";
-        break;
-      case "Data Consistency Review":
-        statusMessage = "Data Consistency Review";
-        break;
-      case "Location Accuracy Flags":
-        statusMessage = "Location Accuracy Flags";
-        break;
-      case "Valid":
-        statusMessage = "Valid";
-        break;
-      default:
-        statusMessage = f.category;
-    }
-
-    updateFacilityStatus(index, "complete", statusMessage);
-
-    stopFacilityTimer(index);
-    return f;
-  } catch (error) {
-    console.error(`Error validating facility ${index}:`, error);
-    updateFacilityStatus(index, "error", "Validation failed");
-    stopFacilityTimer(index);
-
-    f.error = true;
-    f.category = "Error";
-    return f;
-  }
-}
-
-// --- Core validation with progress tracking ---
-async function validateCoordinates() {
-  startTime = Date.now();
-  if (totalTimerInterval) clearInterval(totalTimerInterval);
-  totalTimerInterval = setInterval(updateTotalElapsedTime, 1000);
-
-  const results = [];
-  const batchSize = 10;
-
-  // Show progress section
-  document.getElementById("progressSection").style.display = "block";
-  document.getElementById("overallProgress").style.display = "block";
-  const tracker = document.getElementById("progressTracker");
-  tracker.innerHTML = "";
-
-  // Reset failed checks tracking
-  failedChecks = {};
-
-  // Create progress cards for all facilities
-  uploadedData.forEach((f, i) => {
-    tracker.appendChild(createProgressCard(f, i));
-  });
-
-  // Hide retry progress section if visible
-  const retryProgressSection = document.getElementById("retryProgressSection");
-  if (retryProgressSection) {
-    retryProgressSection.style.display = "none";
-  }
-
-  // Update retry button
-  updateRetryButton();
-
-  // Process facilities in batches
+  // Process facilities in batches with error handling
   for (let i = 0; i < uploadedData.length; i += batchSize) {
     const batch = uploadedData.slice(i, i + batchSize);
 
     try {
+      // Use Promise.allSettled instead of Promise.all for better error handling
       const batchPromises = batch.map((f, idx) =>
         validateSingleFacility(f, i + idx, uploadedData.length)
       );
 
       const batchResults = await Promise.allSettled(batchPromises);
 
+      // Process both successful and failed promises
       batchResults.forEach((result, idx) => {
         if (result.status === "fulfilled") {
           results.push(result.value);
         } else {
+          // Handle failed promise
           console.error(`Facility ${i + idx} failed:`, result.reason);
           const failedFacility = batch[idx];
           failedFacility.error = true;
@@ -1122,6 +701,7 @@ async function validateCoordinates() {
       updateOverallProgress(results.length, uploadedData.length);
     } catch (batchError) {
       console.error("Batch processing error:", batchError);
+      // Even if batch fails, mark all facilities in batch as errors
       batch.forEach((f, idx) => {
         f.error = true;
         f.category = "Error";
@@ -1131,19 +711,15 @@ async function validateCoordinates() {
     }
   }
 
-  const failedCheckCount = countFailedChecks();
   updateApiStatus(
-    `Validation complete: ${results.length} facilities processed. ${failedCheckCount} checks failed.`,
-    failedCheckCount > 0 ? "warning" : "success"
+    `Validation complete: ${results.length} facilities processed`,
+    "success"
   );
 
   // Update UI with results
-  updateMap(results.filter((f) => !f.error));
+  updateMap(results.filter((f) => !f.error)); // Only show non-error facilities on map
   updateResultsTable(results);
   updateStatsFromResults(results);
-
-  // Update retry button
-  updateRetryButton();
 
   // STOP TOTAL TIMER
   if (totalTimerInterval) {
@@ -1230,17 +806,15 @@ function updateMap(results) {
               f.duplicateCheck?.valid ? "No" : "Yes"
             }</p>
             <p style="margin: 0 0 5px 0;"><strong>Road Distance:</strong> ${
-              f.roadDistance?.distance !== null &&
-              f.roadDistance?.distance !== undefined
-                ? f.roadDistance?.distance?.toFixed(2)
+              f.roadDistance?.distance !== null
+                ? f.roadDistance?.distance.toFixed(2)
                 : "N/A"
             }</p>
             <p style="margin: 0 0 5px 0;"><strong>Building Distance:</strong> ${
-              f.buildingDistance?.distance !== null &&
-              f.buildingDistance?.distance !== undefined
-                ? f.buildingDistance?.distance?.toFixed(2) < 1
+              f.buildingDistance?.distance !== null
+                ? f.buildingDistance?.distance.toFixed(2) < 1
                   ? "At location"
-                  : f.buildingDistance?.distance?.toFixed(2)
+                  : f.buildingDistance?.distance.toFixed(2)
                 : "N/A"
             }</p>
             <p style="margin: 0 0 5px 0;">
@@ -1458,23 +1032,12 @@ function showMethodology() {
           </div>
           <div class="modal-body">
             <div class="methodology-section">
-              <h6><i class="fas fa-redo me-2"></i>Retry System</h6>
-              <p>All failed checks (both validation failures and API errors) can be retried. This is useful when:</p>
-              <ul>
-                <li><strong>Validation failures:</strong> Wrong country, Admin mismatch, on water, no road/building nearby, low population</li>
-                <li><strong>API errors:</strong> Network issues, timeouts, server errors</li>
-                <li><strong>Retry logic:</strong> Click "Retry Failed (X)" to retry all failed checks. The button shows count of failed checks.</li>
-                <li><strong>Visual feedback:</strong> Failed checks show ✗ in the progress tracker with special styling for API errors</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
               <h6><i class="fas fa-globe-americas me-2"></i>Country Boundary Check</h6>
               <p>Uses Nominatim reverse geocoding to verify coordinates are within the selected country.</p>
               <ul>
                 <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
-                <li><strong>Validation failure:</strong> Wrong country</li>
-                <li><strong>Retry benefit:</strong> Coordinates might have been mis-entered or API might return different result</li>
+                <li><strong>Impact:</strong> Immediate fail if incorrect</li>
+                <li><strong>Validation:</strong> Compares country code from coordinates with selected country</li>
               </ul>
             </div>
             
@@ -1483,8 +1046,9 @@ function showMethodology() {
               <p>Checks if coordinates fall on water bodies (rivers, lakes, oceans).</p>
               <ul>
                 <li><strong>Source:</strong> Overpass API water features query</li>
-                <li><strong>Validation failure:</strong> On water</li>
-                <li><strong>Retry benefit:</strong> Water data might be incomplete or coordinates slightly off</li>
+                <li><strong>Radius:</strong> 50 meters search radius</li>
+                <li><strong>Impact:</strong> Immediate fail if on water</li>
+                <li><strong>Validation:</strong> Points should not be on water bodies</li>
               </ul>
             </div>
             
@@ -1493,8 +1057,19 @@ function showMethodology() {
               <p>Compares Admin1 level from uploaded data with OSM administrative boundaries.</p>
               <ul>
                 <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
-                <li><strong>Validation failure:</strong> Admin1 mismatch</li>
-                <li><strong>Retry benefit:</strong> OSM data might have been updated or names might match differently</li>
+                <li><strong>Impact:</strong> Data Consistency Review if mismatch</li>
+                <li><strong>Method:</strong> Fuzzy matching of Admin1 names after normalization</li>
+                <li><strong>Display:</strong> Shows both uploaded name and OSM name for comparison</li>
+              </ul>
+            </div>
+            
+            <div class="methodology-section">
+              <h6><i class="fas fa-copy me-2"></i>Duplicate Check</h6>
+              <p>Identifies coordinates that are very close to each other (within 0.001 degrees).</p>
+              <ul>
+                <li><strong>Threshold:</strong> 0.001 degrees (~111 meters)</li>
+                <li><strong>Impact:</strong> Data Consistency Review if duplicates found</li>
+                <li><strong>Purpose:</strong> Prevents duplicate facility entries</li>
               </ul>
             </div>
             
@@ -1503,8 +1078,9 @@ function showMethodology() {
               <p>Calculates distance to nearest road using Overture Maps transportation data with Overpass API fallback.</p>
               <ul>
                 <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
-                <li><strong>Validation failure:</strong> No road within 500m</li>
-                <li><strong>Retry benefit:</strong> Road data might be incomplete or API might return different result</li>
+                <li><strong>Fallback:</strong> Overpass API for road networks</li>
+                <li><strong>Impact:</strong> Location Accuracy Flags if no road within 500m</li>
+                <li><strong>Optimal:</strong> Distance ≤ 100 meters</li>
               </ul>
             </div>
             
@@ -1513,8 +1089,9 @@ function showMethodology() {
               <p>Finds distance to nearest building using Overture Maps building data with Overpass API fallback.</p>
               <ul>
                 <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
-                <li><strong>Validation failure:</strong> No building within 200m</li>
-                <li><strong>Retry benefit:</strong> Building data might be incomplete or API might return different result</li>
+                <li><strong>Fallback:</strong> Overpass API for building data</li>
+                <li><strong>Impact:</strong> Location Accuracy Flags if no building within 200m</li>
+                <li><strong>Optimal:</strong> Distance ≤ 50 meters</li>
               </ul>
             </div>
             
@@ -1523,8 +1100,9 @@ function showMethodology() {
               <p>Estimates population within ~1km radius using WorldPop dataset.</p>
               <ul>
                 <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
-                <li><strong>Validation failure:</strong> Population ≤ 100 within ~1km</li>
-                <li><strong>Retry benefit:</strong> Population data might have been updated</li>
+                <li><strong>Resolution:</strong> 100m × 100m grid</li>
+                <li><strong>Impact:</strong> Location Accuracy Flags if population ≤ 100</li>
+                <li><strong>Validation:</strong> Minimum 100 people within ~1km radius</li>
               </ul>
             </div>
             
@@ -1563,19 +1141,17 @@ function showMethodology() {
                 </tbody>
               </table>
               <p class="mt-2">
-                <strong>Retry Strategy:</strong> Use the "Retry Failed" button to retry all failed checks. This can help when:
-                <ol>
-                  <li>API data has been updated since last check</li>
-                  <li>Network issues caused API failures</li>
-                  <li>You want to verify if coordinates might now pass validation</li>
-                  <li>You've corrected some data and want to re-validate</li>
-                </ol>
+                <strong>Category Interpretation:</strong><br>
+                • <span class="text-success">Valid</span>: All checks pass - coordinates are reliable<br>
+                • <span class="text-warning">Data Consistency Review</span>: Potential data entry or administrative issues<br>
+                • <span class="text-warning">Location Accuracy Flags</span>: Physical location may be inaccurate<br>
+                • <span class="text-danger">Invalid</span>: Fundamental errors requiring immediate correction
               </p>
             </div>
             
             <div class="alert alert-info mt-3">
               <i class="fas fa-lightbulb me-2"></i>
-              <strong>Note:</strong> All API calls are cached for performance. The retry button allows you to bypass cache and get fresh results for failed checks.
+              <strong>Note:</strong> All API calls are cached for performance. Processing time depends on number of facilities and API availability.
             </div>
           </div>
           <div class="modal-footer">
@@ -1636,44 +1212,6 @@ const methodologyCSS = `
 
 .admin-comparison small {
   display: block;
-}
-
-.status-retrying {
-  color: #ffc107;
-  font-weight: 600;
-}
-
-.facility-progress.retrying {
-  border-left-color: #ffc107;
-  background-color: rgba(255, 193, 7, 0.05);
-}
-
-.api-check.check-failed {
-  background-color: rgba(220, 53, 69, 0.1);
-}
-
-.api-check.check-failed:hover {
-  background-color: rgba(220, 53, 69, 0.2);
-  cursor: pointer;
-}
-
-.api-check.check-failed.api-error {
-  background-color: rgba(220, 53, 69, 0.2);
-  border: 1px solid #dc3545;
-}
-
-.api-check.check-failed.api-error:hover {
-  background-color: rgba(220, 53, 69, 0.3);
-  cursor: pointer;
-}
-
-.retry-count-badge {
-  background-color: #dc3545;
-  color: white;
-  border-radius: 10px;
-  padding: 2px 8px;
-  font-size: 0.75em;
-  margin-left: 5px;
 }
 `;
 
