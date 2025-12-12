@@ -754,15 +754,29 @@ function updateStatsFromResults(results) {
 }
 
 function updateMap(results) {
-  map.eachLayer((l) => {
-    if (l instanceof L.Marker) map.removeLayer(l);
+  // Clear previous marker layers
+  if (window.markerCluster) {
+    map.removeLayer(window.markerCluster);
+  }
+
+  // Create cluster group with chunked loading (smooth UI)
+  const markerCluster = L.markerClusterGroup({
+    chunkedLoading: true,
+    spiderfyOnMaxZoom: true,
+    disableClusteringAtZoom: 17,
   });
+
+  window.markerCluster = markerCluster;
+
+  // Canvas renderer (huge performance boost)
+  const renderer = L.canvas({ padding: 0.5 });
+
   markers = {};
 
   results.forEach((f, i) => {
-    if (f.error) return; // Skip error facilities on map
+    if (f.error) return;
 
-    // Determine color based on category
+    // Assign marker color by category
     let color = "";
     switch (f.category) {
       case "Valid":
@@ -778,68 +792,69 @@ function updateMap(results) {
         color = "#ff0054";
         break;
       default:
-        color = "#808080"; // Gray for unknown
+        color = "#808080";
     }
 
-    const m = L.marker([parseFloat(f.y), parseFloat(f.x)], {
-      icon: L.divIcon({
-        className: "custom-marker",
-        html: `<div style="background-color:${color};width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow: 0 2px 5px rgba(0,0,0,0.3);"></div>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
-      }),
-    }).addTo(map);
+    // Use fast CircleMarker + Canvas renderer
+    const marker = L.circleMarker([parseFloat(f.y), parseFloat(f.x)], {
+      renderer,
+      radius: 6,
+      weight: 2,
+      color: "white",
+      fillColor: color,
+      fillOpacity: 0.95,
+    });
 
-    m.bindPopup(`
-          <div style="min-width: 250px;">
-            <h6 style="margin: 0 0 10px 0; color: ${color}"><strong>${
+    // Keep your popup content fully intact
+    marker.bindPopup(`
+      <div style="min-width: 250px;">
+        <h6 style="margin: 0 0 10px 0; color: ${color}"><strong>${
       f.Name
     }</strong></h6>
-            <p style="margin: 0 0 5px 0;"><strong>Coordinates:</strong> ${
-              f.x
-            }, ${f.y}</p>
-            <p style="margin: 0 0 5px 0;"><strong>Status:</strong> ${
-              f.category
-            }</p>
-            <p style="margin: 0 0 5px 0;"><strong>Country Match:</strong> ${
-              f.countryBoundary?.valid ? "✓" : "✗"
-            } (${f.countryBoundary?.countryName || "Unknown"})</p>
-            <p style="margin: 0 0 5px 0;"><strong>On Water:</strong> ${
-              f.waterCheck?.on_water ? "Yes" : "No"
-            }</p>
-            <p style="margin: 0 0 5px 0;"><strong>Duplicate:</strong> ${
-              f.duplicateCheck?.valid ? "No" : "Yes"
-            }</p>
-            <p style="margin: 0 0 5px 0;"><strong>Road Distance:</strong> ${
-              f.roadDistance?.distance !== null
-                ? f.roadDistance?.distance.toFixed(2)
-                : "N/A"
-            }</p>
-            <p style="margin: 0 0 5px 0;"><strong>Building Distance:</strong> ${
-              f.buildingDistance?.distance !== null
-                ? f.buildingDistance?.distance.toFixed(2) < 1
-                  ? "At location"
-                  : f.buildingDistance?.distance.toFixed(2)
-                : "N/A"
-            }</p>
-            <p style="margin: 0 0 5px 0;">
-              <strong>Admin Match:</strong> ${
-                f.adminAreaMatch?.valid ? "✓" : "✗"
-              }<br>
-              <small>Uploaded: ${f.Admin1 || "N/A"}</small><br>
-              <small>OSM: ${f.adminAreaMatch?.osmAdminName || "N/A"}</small>
-            </p>
-          </div>
-        `);
+        <p><strong>Coordinates:</strong> ${f.x}, ${f.y}</p>
+        <p><strong>Status:</strong> ${f.category}</p>
+        <p><strong>Country Match:</strong> ${
+          f.countryBoundary?.valid ? "✓" : "✗"
+        } (${f.countryBoundary?.countryName || "Unknown"})</p>
+        <p><strong>On Water:</strong> ${
+          f.waterCheck?.on_water ? "Yes" : "No"
+        }</p>
+        <p><strong>Duplicate:</strong> ${
+          f.duplicateCheck?.valid ? "No" : "Yes"
+        }</p>
+        <p><strong>Road Distance:</strong> ${
+          f.roadDistance?.distance !== null
+            ? f.roadDistance.distance.toFixed(2)
+            : "N/A"
+        }</p>
+        <p><strong>Building Distance:</strong> ${
+          f.buildingDistance?.distance !== null
+            ? f.buildingDistance.distance.toFixed(2) < 1
+              ? "At location"
+              : f.buildingDistance.distance.toFixed(2)
+            : "N/A"
+        }</p>
+        <p>
+          <strong>Admin Match:</strong> ${
+            f.adminAreaMatch?.valid ? "✓" : "✗"
+          }<br>
+          <small>Uploaded: ${f.Admin1 || "N/A"}</small><br>
+          <small>OSM: ${f.adminAreaMatch?.osmAdminName || "N/A"}</small>
+        </p>
+      </div>
+    `);
 
-    markers[i] = m;
+    markers[i] = marker;
+    markerCluster.addLayer(marker);
   });
 
-  // Fit map to show all markers if there are any
-  const validMarkers = Object.values(markers);
-  if (validMarkers.length > 0) {
-    const markerGroup = new L.featureGroup(validMarkers);
-    map.fitBounds(markerGroup.getBounds().pad(0.1));
+  // Add clusters to map
+  map.addLayer(markerCluster);
+
+  // Fit map to markers
+  if (Object.values(markers).length > 0) {
+    const bounds = markerCluster.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.1));
   }
 }
 
