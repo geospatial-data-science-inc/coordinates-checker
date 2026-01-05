@@ -138,8 +138,7 @@ def get_cache_batch_raw(keys: List[str]) -> Dict[str, any]:
                 if v is not None:
                     # Unpack raw value immediately to match original control flow
                     results[k] = unpack(v)
-                    print(f"[Upstash batch get] key: {k} retrieved")
-                    print(f"[Upstash batch get] unpacked value: {results[k]}")
+                    
         except Exception as e:
             print(f"[Upstash batch get error] {e}")
 
@@ -217,6 +216,7 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
 BUCKET = os.getenv("DUCKDB_BUCKET", "s3://overturemaps-us-west-2/release/2025-10-22.0")
 DUCKDB_FILE = os.getenv("DUCKDB_FILE", "/tmp/overture.duckdb")
+
 
 print("[Startup] Initializing DuckDB connection...")
 conn = duckdb.connect(database=DUCKDB_FILE)
@@ -296,10 +296,138 @@ def overpass_nearest_place(lat, lon, radius=2000):
     e = elems[0]
     return {"id": e.get("id"), "name": e.get("tags", {}).get("name"), "distance": dist(e), "source": "overpass"}
 
-def overpass_water_check(lat, lon, radius=50):
-    q = f"""[out:json][timeout:25];(way(around:{radius},{lat},{lon})["water"];relation(around:{radius},{lat},{lon})["water"];node(around:{radius},{lat},{lon})[natural=water];node(around:{radius},{lat},{lon})[water];);out qt 1;"""
-    elems = overpass_query(q)
-    return len(elems) > 0
+
+
+# def overture_water_check(lat: float, lon: float) -> bool:
+#     """
+#     Returns True if the point is on water (ocean, sea, lake, river).
+#     Uses Overture base:water with bbox pruning + ST_Contains.
+#     """
+
+#     lat_r = round(lat, 4)
+#     lon_r = round(lon, 4)
+
+#     path_pattern = (
+#         "s3://overturemaps-us-west-2/"
+#         "release/2025-12-17.0/theme=base/type=water/*"
+#     )
+
+#     query = f"""
+#     SELECT 1
+#     FROM read_parquet(
+#         '{path_pattern}',
+#         filename=true,
+#         hive_partitioning=1
+#     )
+#     WHERE
+#         -- FAST bbox pruning (struct comparison, no spatial funcs)
+#         bbox.xmin <= {lon_r}
+#         AND bbox.xmax >= {lon_r}
+#         AND bbox.ymin <= {lat_r}
+#         AND bbox.ymax >= {lat_r}
+
+#         -- Exact geometry test
+#         AND ST_Contains(
+#             geometry,
+#             ST_Point({lon_r}, {lat_r})::GEOMETRY
+#         )
+#     LIMIT 1;
+#     """
+
+#     try:
+#         return conn.execute(query).fetchone() is not None
+#     except Exception as e:
+#         print(f"[DuckDB water check error] {e}")
+#         return False
+
+def overture_water_check(lat: float, lon: float) -> dict:
+    """
+    Returns structured water result:
+    {
+      "on_water": bool,
+      "id": overture_id | None,
+      "is_salt": bool | None,
+      "source": "overture"
+    }
+    """
+
+    lat_r = round(lat, 4)
+    lon_r = round(lon, 4)
+
+    path_pattern = (
+        "s3://overturemaps-us-west-2/"
+        "release/2025-12-17.0/theme=base/type=water/*"
+    )
+
+    query = f"""
+    SELECT
+        id,
+        is_salt,
+        geometry,
+        version,
+        sources,
+        is_intermittent,
+        version
+    FROM read_parquet(
+        '{path_pattern}',
+        filename=true,
+        hive_partitioning=1
+    )
+    WHERE
+        bbox.xmin <= {lon_r}
+        AND bbox.xmax >= {lon_r}
+        AND bbox.ymin <= {lat_r}
+        AND bbox.ymax >= {lat_r}
+        AND ST_Contains(
+            geometry,
+            ST_Point({lon_r}, {lat_r})::GEOMETRY
+        )
+    LIMIT 1;
+    """
+
+    try:
+        row = conn.execute(query).fetchone()
+        if row:
+            return {
+                "on_water": True,
+                "id": row[0],
+                "is_salt": row[1],
+                "source": "overture",
+                "geometry": row[2],
+                "version": row[3],
+                "sources": row[4],
+                "is_intermittent": row[5],
+                "version": row[6]
+            }
+
+        return {
+            "on_water": False,
+            "id": None,
+            "is_salt": None,
+            "source": "overture",
+            "geometry": None,
+            "version": None,
+            "sources": None,
+            "is_intermittent": None,
+            "version": None
+
+        }
+
+    except Exception as e:
+        print(f"[DuckDB water check error] {e}")
+        return {
+            "on_water": False,
+            "id": None,
+            "error": "query_failed",
+            "source": "overture",
+            "geometry": None,
+            "version": None,
+            "sources": None,
+            "is_intermittent": None,
+            "version": None
+        }
+
+
 
 def overpass_query(q: str):
     try:
@@ -307,7 +435,7 @@ def overpass_query(q: str):
         r.raise_for_status()
         return r.json().get("elements", [])
     except Exception as e:
-        print(f"[Overpass request failed] {e}")
+        # print(f"[Overpass request failed] {e}")
         return []
 
 def point_to_geojson(lat, lon, delta=0.01):
@@ -373,7 +501,7 @@ def run_query_for_miss(
         elif is_nominatim:
             res = nominatim_lookup_no_cache(lat, lon)
         elif is_water_check:
-            res = overpass_water_check(lat, lon)
+            res = overture_water_check(lat, lon)
         else:
             # DuckDB/Overpass fallback logic
             res = query_duckdb_optimized(table, type_, lat, lon)
@@ -417,7 +545,7 @@ def validate_batch():
             (f"duckdb_transportation_segment_{lat_r}_{lon_r}", lat, lon, "transportation", "segment", overpass_nearest_road, False, False, False, i),
             (f"duckdb_base_water_{lat_r}_{lon_r}", lat, lon, "base", "water", None, False, False, False, i),
             (f"duckdb_places_place_{lat_r}_{lon_r}", lat, lon, "places", "place", overpass_nearest_place, False, False, False, i),
-            (f"water_check_{lat_r}_{lon_r}", lat, lon, "base", "water", overpass_water_check, True, False, False, i), 
+            (f"water_check_{lat_r}_{lon_r}", lat, lon, "base", "water", overture_water_check, True, False, False, i), 
             (f"worldpop_{lat_r}_{lon_r}", lat, lon, None, None, None, False, True, False, i), 
             (f"nominatim_{lat_r}_{lon_r}", lat, lon, None, None, None, False, False, True, i), 
         ]
@@ -475,8 +603,9 @@ def validate_batch():
                     final_results[index]["water"] = result
                 elif table == "places" and type_ == "place":
                     final_results[index]["place"] = result
-                elif is_w_c: # Overpass Water Check
-                    final_results[index]["on_water"] = bool(result)
+                elif is_w_c: # overture Water Check
+                    # final_results[index]["on_water"] = bool(result)
+                    final_results[index]["water_check"] = result
                 elif is_wp: # WorldPop
                     final_results[index]["population"] = result
                 elif is_nom: # Nominatim
@@ -602,13 +731,33 @@ def water_check():
         return jsonify({"error": "Invalid coordinates"}), 400
         
     lat_r = round(lat, 4); lon_r = round(lon, 4)
-    key_data = (f"water_check_{lat_r}_{lon_r}", lat, lon, "", "", overpass_water_check, True, False, False)
+    key_data = (f"water_check_{lat_r}_{lon_r}", lat, lon, "", "", overture_water_check, True, False, False)
     on_water = single_query_with_executor(key_data)
 
+    # 🔒 Backward compatibility with old cached booleans
+    if isinstance(on_water, bool):
+        on_water = {
+            "on_water": on_water,
+            "id": None,
+            "is_salt": None,
+            "source": "legacy_cache"
+        }
+
     return jsonify({
-        "on_water": bool(on_water),
-        "message": "Point lies on water" if on_water else "Point is on land"
+        "on_water": on_water.get("on_water", False),
+        "water_id": on_water.get("id"),
+        "is_salt": on_water.get("is_salt"),
+        "source": on_water.get("source", "unknown"),
+        "version": on_water.get("version"),
+        "sources": on_water.get("sources"),
+        "is_intermittent": on_water.get("is_intermittent"),
+        "message": (
+            "Point lies on water"
+            if on_water.get("on_water")
+            else "Point is on land"
+        )
     })
+
 
 @app.route("/api/overture_match", methods=["GET"])
 def overture_match():
