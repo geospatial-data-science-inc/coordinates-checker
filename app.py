@@ -397,7 +397,6 @@ def overture_water_check(lat: float, lon: float) -> dict:
                 "version": row[3],
                 "sources": row[4],
                 "is_intermittent": row[5],
-                "version": row[6]
             }
 
         return {
@@ -409,7 +408,6 @@ def overture_water_check(lat: float, lon: float) -> dict:
             "version": None,
             "sources": None,
             "is_intermittent": None,
-            "version": None
 
         }
 
@@ -424,7 +422,6 @@ def overture_water_check(lat: float, lon: float) -> dict:
             "version": None,
             "sources": None,
             "is_intermittent": None,
-            "version": None
         }
 
 
