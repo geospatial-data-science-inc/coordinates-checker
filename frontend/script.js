@@ -99,13 +99,7 @@ $(document).ready(function () {
         text: '<i class="fas fa-file-csv me-1"></i> Export CSV',
         className: "btn btn-outline-primary btn-sm",
       },
-      {
-        text: '<i class="fas fa-download me-1"></i> Download Dataset',
-        className: "btn btn-info btn-sm",
-        action: function (e, dt, node, config) {
-          downloadOriginalDataset();
-        },
-      },
+
       {
         text: '<i class="fas fa-info-circle me-1"></i> Methodology',
         className: "btn btn-secondary btn-sm",
@@ -185,14 +179,12 @@ const countryAlpha2Map = {
 };
 
 const API_CONFIG = {
-  worldpop: "https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: "https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: "https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    "https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    "https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: "https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: " http://127.0.0.1:5000/api/worldpop",
+  nominatim: " http://127.0.0.1:5000/api/nominatim",
+  overture: " http://127.0.0.1:5000/api/overture_match",
+  road_distance: " http://127.0.0.1:5000/api/road_distance",
+  building_distance: " http://127.0.0.1:5000/api/building_distance",
+  water_check: " http://127.0.0.1:5000/api/water_check",
 };
 
 document
@@ -550,6 +542,7 @@ async function validateCoordinates() {
         console.log("road", roadData);
         f.roadDistance = {
           valid: roadData.valid || false,
+          id: roadData.id || null,
           distance: roadData.distance !== undefined ? roadData.distance : null,
           message: roadData.message || "No road nearby",
         };
@@ -558,6 +551,7 @@ async function validateCoordinates() {
         f.roadDistance = {
           valid: false,
           distance: null,
+          id: null,
           message: "Road distance failed",
         };
         updateCheckStatus(index, "road", "failed");
@@ -572,6 +566,7 @@ async function validateCoordinates() {
         const buildData = await buildResp.json();
         f.buildingDistance = {
           valid: buildData.valid || false,
+          id: buildData.id || null,
           distance:
             buildData.distance !== undefined ? buildData.distance : null,
           message: buildData.message || "No building nearby",
@@ -584,6 +579,7 @@ async function validateCoordinates() {
       } catch (e) {
         f.buildingDistance = {
           valid: false,
+          id: null,
           distance: null,
           message: "Building distance failed",
         };
@@ -621,7 +617,7 @@ async function validateCoordinates() {
         const population = popData.population || 0;
 
         f.populationDensity = {
-          valid: population > 100,
+          valid: population > 0,
           population,
           message: `Population ~1km: ${population}`,
         };
@@ -898,23 +894,20 @@ function updateResultsTable(results) {
           }">${f.countryBoundary?.valid ? "Pass" : "Fail"}</span>`,
       7: f.error
         ? '<span class="badge bg-secondary">Error</span>'
-        : `<div class="admin-comparison">
-             <div><small><strong>Uploaded:</strong> ${
-               f.Admin1 || "N/A"
-             }</small></div>
-             <div><small><strong>OSM:</strong> ${
-               f.adminAreaMatch?.osmAdminName || "N/A"
-             }</small></div>
+        : `<div>${f.adminAreaMatch?.osmAdminName || "N/A"}</small></div>`,
+      8: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<div class="admin-comparison">   
              <div><span class="badge ${
                f.adminAreaMatch?.valid ? "bg-success" : "bg-warning"
              }">${f.adminAreaMatch?.valid ? "Pass" : "Fail"}</span></div>
            </div>`,
-      8: f.error
+      9: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.duplicateCheck?.valid ? "bg-success" : "bg-warning"
           }">${f.duplicateCheck?.valid ? "Pass" : "Fail"}</span>`,
-      9: f.error
+      10: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.roadDistance?.valid ? "bg-success" : "bg-warning"
@@ -923,12 +916,15 @@ function updateResultsTable(results) {
               ? f.roadDistance?.distance.toFixed(2)
               : "N/A"
           }</span>`,
-      10: f.error
+      11: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<div>${f.roadDistance?.id || "N/A"}</small></div>`,
+      12: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             !f.waterCheck?.on_water ? "bg-success" : "bg-danger"
           }">${!f.waterCheck?.on_water ? "Pass" : "Fail"}</span>`,
-      11: f.error
+      13: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.buildingDistance?.valid ? "bg-success" : "bg-warning"
@@ -938,7 +934,10 @@ function updateResultsTable(results) {
               ? f.buildingDistance?.distance.toFixed(2)
               : "N/A"
           }</span>`,
-      12: f.error
+      14: f.error
+        ? '<span class="badge bg-secondary">Error</span>'
+        : `<div>${f.buildingDistance?.id || "N/A"}</small></div>`,
+      15: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.populationDensity?.valid ? "bg-success" : "bg-warning"
@@ -947,7 +946,7 @@ function updateResultsTable(results) {
               ? f.populationDensity.population.toLocaleString()
               : "N/A"
           }</span>`,
-      13: f.error
+      16: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.category === "Valid"
@@ -981,60 +980,6 @@ function updateApiStatus(msg, type = "info") {
   const statusEl = document.getElementById("apiStatus");
   statusEl.textContent = msg;
   statusEl.className = `api-status status-${type}`;
-}
-
-// Download original dataset function
-function downloadOriginalDataset() {
-  if (!uploadedData || uploadedData.length === 0) {
-    alert("No dataset uploaded yet. Please upload a CSV file first.");
-    return;
-  }
-
-  // Get the original column names from the first row
-  const firstRow = uploadedData[0];
-  const columns = Object.keys(firstRow);
-
-  // Convert data to CSV format
-  const csvContent = [
-    columns.join(","), // Header row
-    ...uploadedData.map((row) =>
-      columns
-        .map((col) => {
-          const value = row[col];
-          // Handle values that might contain commas or quotes
-          if (value === null || value === undefined) return "";
-          const stringValue = String(value);
-          if (
-            stringValue.includes(",") ||
-            stringValue.includes('"') ||
-            stringValue.includes("\n")
-          ) {
-            return '"' + stringValue.replace(/"/g, '""') + '"';
-          }
-          return stringValue;
-        })
-        .join(",")
-    ),
-  ].join("\n");
-
-  // Create download link
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const link = document.createElement("a");
-  const url = URL.createObjectURL(blob);
-
-  // Get filename from original upload or use default
-  const fileInput = document.getElementById("fileUpload");
-  let filename = "uploaded_dataset.csv";
-  if (fileInput.files.length > 0) {
-    filename = fileInput.files[0].name;
-  }
-
-  link.setAttribute("href", url);
-  link.setAttribute("download", filename);
-  link.style.visibility = "hidden";
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
 }
 
 // Show methodology modal with updated categorical system

@@ -1082,7 +1082,7 @@ def water_check():
         False,
     )
     on_water = single_query_with_executor(key_data)
-
+    print(f"water check result: {on_water}")
     # 🔒 Backward compatibility with old cached booleans
     if isinstance(on_water, bool):
         on_water = {
