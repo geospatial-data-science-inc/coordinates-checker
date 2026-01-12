@@ -10,3 +10,4 @@ redis==7.1.0
 aiohttp==3.13.2
 upstash-redis
 rasterio==1.4.4
+pyproj==3.7.1
