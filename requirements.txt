@@ -9,4 +9,4 @@ pandas==2.3.3
 redis==7.1.0
 aiohttp==3.13.2
 upstash-redis
-rasterio
+rasterio==1.4.4
