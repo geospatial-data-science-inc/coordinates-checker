@@ -234,7 +234,7 @@ WORLDPOP_YEAR = 2020
 WORLDPOP_TEMPLATE = "https://api.worldpop.org/v1/services/stats"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
-BUCKET = os.getenv("DUCKDB_BUCKET", "s3://overturemaps-us-west-2/release/2025-10-22.0")
+BUCKET = os.getenv("DUCKDB_BUCKET", "s3://overturemaps-us-west-2/release/2025-12-17.0")
 DUCKDB_FILE = os.getenv("DUCKDB_FILE", "/tmp/overture.duckdb")
 
 
@@ -242,7 +242,7 @@ print("[Startup] Initializing DuckDB connection...")
 conn = duckdb.connect(database=DUCKDB_FILE)
 conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
 conn.execute(
-    "SET s3_region='us-west-2'; SET memory_limit='2GB'; SET threads=6; SET enable_object_cache=true;"
+    "SET s3_region='us-west-2'; SET memory_limit='1GB'; SET threads=4; SET enable_object_cache=true;"
 )
 
 ISO2_TO_ISO3 = {
@@ -274,7 +274,7 @@ validate_worldpop_url()
 # All synchronous functions are left as is, as they are called by the ThreadPoolExecutor
 
 
-def query_duckdb_optimized(table, type_, lat, lon, duckdb_delta=0.012):
+def query_duckdb_optimized(table, type_, lat, lon, duckdb_delta=0.01):
     lat_r = round(lat, 4)
     lon_r = round(lon, 4)
     path_pattern = f"{BUCKET}/theme={table}/type={type_}/*"
