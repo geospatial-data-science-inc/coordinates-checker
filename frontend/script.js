@@ -178,15 +178,15 @@ const countryAlpha2Map = {
   NG: "ng",
 };
 
+const csvTemplateHeaders = ["Name", "x", "y", "Admin1", "Admin2", "Admin3"];
+
 const API_CONFIG = {
-  worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: " http://127.0.0.1:5000/api/worldpop",
+  nominatim: " http://127.0.0.1:5000/api/nominatim",
+  overture: " http://127.0.0.1:5000/api/overture_match",
+  road_distance: " http://127.0.0.1:5000/api/road_distance",
+  building_distance: " http://127.0.0.1:5000/api/building_distance",
+  water_check: " http://127.0.0.1:5000/api/water_check",
 };
 
 document
@@ -285,6 +285,152 @@ async function loadCountryBoundary(countryCode) {
 
 function normalize(str) {
   return str ? str.toLowerCase().replace(/\s+/g, "").trim() : "";
+}
+
+// Scenario
+document
+  .getElementById("scenarioUpload")
+  .addEventListener("change", handleScenarioUpload);
+
+function handleScenarioUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  Papa.parse(file, {
+    header: true,
+    skipEmptyLines: true,
+    complete: function (results) {
+      const scenarioData = results.data;
+
+      if (!scenarioData.length) {
+        alert("Scenario file is empty or invalid.");
+        return;
+      }
+
+      // Normalize scenario rows into system format
+      const normalizedResults = scenarioData.map((row) => ({
+        Name: row["Facility"],
+
+        x: parseFloat(row["Longitude (X)"]),
+        y: parseFloat(row["Latitude (Y)"]),
+
+        Admin1: row["Admin1"] || "",
+        Admin2: row["Admin2"] || "",
+        Admin3: row["Admin3"] || "",
+
+        // Final classification already decided
+        category: row["Score"] || "Unknown",
+
+        countryBoundary: {
+          valid: row["Country"] === "Pass",
+          countryName: row["Admin1"] || "",
+        },
+
+        adminAreaMatch: {
+          valid: row["Admin Area match"] === "Pass",
+          osmAdminName: row["OSM Admin Area 1"] || "",
+        },
+
+        duplicateCheck: {
+          valid: row["Duplicate"] === "Pass",
+        },
+
+        roadDistance: {
+          valid: row["Nearby Road (m)"] !== "",
+          distance: row["Nearby Road (m)"]
+            ? parseFloat(row["Nearby Road (m)"])
+            : null,
+          id: row["Overture road ID"] || null,
+        },
+
+        buildingDistance: {
+          valid: row["Nearby Building (m)"] !== "",
+          distance: row["Nearby Building (m)"]
+            ? parseFloat(row["Nearby Building (m)"])
+            : null,
+          id: row["Overture building ID"] || null,
+        },
+
+        waterCheck: {
+          on_water: row["On Water"] !== "Pass",
+        },
+
+        populationDensity: {
+          valid: !!row["Population"],
+          population: row["Population"]
+            ? parseInt(row["Population"].replace(/,/g, ""))
+            : null,
+        },
+
+        error: false,
+      }));
+
+      // Reset timers and progress UI
+      if (totalTimerInterval) {
+        clearInterval(totalTimerInterval);
+        totalTimerInterval = null;
+      }
+
+      document.getElementById("progressSection").style.display = "none";
+      document.getElementById("overallProgress").style.display = "none";
+
+      // Populate system
+      uploadedData = normalizedResults;
+      updateMap(normalizedResults);
+      zoomMapToResults(normalizedResults);
+
+      updateResultsTable(normalizedResults);
+      updateStatsFromResults(normalizedResults);
+
+      updateApiStatus(
+        `Scenario loaded: ${normalizedResults.length} facilities`,
+        "success"
+      );
+    },
+  });
+}
+
+function zoomMapToResults(results) {
+  if (!results || results.length === 0) return;
+
+  const latLngs = results
+    .filter((r) => !isNaN(r.y) && !isNaN(r.x))
+    .map((r) => [r.y, r.x]);
+
+  if (latLngs.length === 0) return;
+
+  const bounds = L.latLngBounds(latLngs);
+  map.fitBounds(bounds, {
+    padding: [40, 40],
+    maxZoom: 12,
+  });
+}
+
+//Csv template
+document
+  .getElementById("downloadTemplateBtn")
+  .addEventListener("click", downloadCsvTemplate);
+
+function downloadCsvTemplate() {
+  const rows = [csvTemplateHeaders];
+
+  const csvContent = rows.map((row) => row.join(",")).join("\n");
+
+  const blob = new Blob([csvContent], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "health_facility_upload_template.csv";
+
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  URL.revokeObjectURL(url);
 }
 
 // Progress tracking UI functions

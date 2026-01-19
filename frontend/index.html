@@ -56,11 +56,12 @@
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="cache-tab" data-bs-toggle="tab" data-bs-target="#cache-pane" type="button"
-              role="tab">
-              <i class="fas fa-database me-1"></i> Cached
+            <button class="nav-link" id="scenario-tab" data-bs-toggle="tab" data-bs-target="#scenario-pane"
+              type="button" role="tab">
+              <i class="fas fa-layer-group me-1"></i> Scenarios
             </button>
           </li>
+
         </ul>
 
         <!-- Tab Content -->
@@ -82,7 +83,13 @@
 
             <label class="form-label mt-3">Upload CSV File</label>
             <input type="file" class="form-control" id="fileUpload" accept=".csv">
+
             <div class="form-text">CSV columns: Name, x, y, Admin1, Admin2, Admin3</div>
+            <div class="d-grid gap-2 mt-2">
+              <button class="btn btn-primary mt-3 w-100" id="downloadTemplateBtn">
+                <i class="fas fa-download me-2"></i> Download Template
+              </button>
+            </div>
 
             <button class="btn btn-primary mt-3 w-100" id="validateBtn" disabled>
               <i class="fas fa-play-circle me-2"></i>Validate Coordinates
@@ -96,57 +103,28 @@
           </div>
 
           <!-- Cached Datasets Tab -->
-          <div class="tab-pane fade" id="cache-pane" role="tabpanel">
-            <h5>Cached Datasets</h5>
+          <div class="tab-pane fade" id="scenario-pane" role="tabpanel">
+            <h5>Load Scenario</h5>
 
-            <!-- Search and Filter -->
-            <div class="input-group mb-3">
-              <input type="text" class="form-control" id="datasetSearch" placeholder="Search datasets...">
-              <button class="btn btn-outline-secondary" type="button" id="clearSearch">
-                <i class="fas fa-times"></i>
-              </button>
+            <p class="">
+              Upload a CSV containing <strong>pre-validated</strong> facilities.
+              This will instantly populate the map, results table, and statistics
+              without calling validation APIs.
+            </p>
+
+            <label class="form-label mt-3">Scenario CSV File</label>
+            <input type="file" class="form-control" id="scenarioUpload" accept=".csv" />
+
+            <div class="form-text">
+              Designed for demos, benchmarking, and offline review.
             </div>
 
-            <!-- Filters -->
-            <div class="row g-2 mb-3">
-              <div class="col-6">
-                <select class="form-select form-select-sm" id="countryFilter">
-                  <option value="">All Countries</option>
-                  <option value="MW">Malawi</option>
-                  <option value="KE">Kenya</option>
-                  <option value="TZ">Tanzania</option>
-                  <option value="UG">Uganda</option>
-                  <option value="ZM">Zambia</option>
-                  <option value="ZW">Zimbabwe</option>
-                  <option value="NG">Nigeria</option>
-                </select>
-              </div>
-              <div class="col-6">
-                <select class="form-select form-select-sm" id="sortFilter">
-                  <option value="newest">Newest First</option>
-                  <option value="oldest">Oldest First</option>
-                  <option value="name">Name A-Z</option>
-                  <option value="size">Size (Large)</option>
-                  <option value="facilities">Most Facilities</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Dataset List -->
-            <div id="cachedDatasetsList" class="dataset-list" style="max-height: 350px; overflow-y: auto;">
-              <div class="text-center py-4 text-muted">
-                <i class="fas fa-spinner fa-spin me-2"></i>
-                <p>Loading cached datasets...</p>
-              </div>
-            </div>
-
-            <!-- Actions -->
-            <div class="d-grid gap-2 mt-3">
-              <button class="btn btn-primary mt-3 w-100" id="refreshDatasetsBtn">
-                <i class="fas fa-sync-alt me-1"></i>Refresh List
-              </button>
+            <div class="alert alert-info mt-3" role="alert">
+              <i class="fas fa-info-circle me-1"></i>
+              Scenario mode bypasses live validation and API calls.
             </div>
           </div>
+
         </div>
 
         <!-- API Status (Shared) -->
