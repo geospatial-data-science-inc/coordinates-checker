@@ -181,12 +181,14 @@ const countryAlpha2Map = {
 const csvTemplateHeaders = ["Name", "x", "y", "Admin1", "Admin2", "Admin3"];
 
 const API_CONFIG = {
-  worldpop: " http://127.0.0.1:5000/api/worldpop",
-  nominatim: " http://127.0.0.1:5000/api/nominatim",
-  overture: " http://127.0.0.1:5000/api/overture_match",
-  road_distance: " http://127.0.0.1:5000/api/road_distance",
-  building_distance: " http://127.0.0.1:5000/api/building_distance",
-  water_check: " http://127.0.0.1:5000/api/water_check",
+  worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
+  nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
+  overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
+  road_distance:
+    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
+  building_distance:
+    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
+  water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
 };
 
 document
