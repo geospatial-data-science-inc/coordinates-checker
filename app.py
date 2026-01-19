@@ -21,9 +21,11 @@ from rasterio.errors import RasterioIOError
 from pyproj import Transformer
 from rasterio.session import AWSSession
 import boto3
+from rasterio.windows import Window
+import rasterio
+import math
 
 # -----------------------------
-# Configuration and Initialization (Unchanged)
 load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
@@ -567,7 +569,9 @@ def point_to_geojson(lat, lon, delta=0.01):
     }
 
 
-def get_worldpop_population_no_cache(lat: float, lon: float) -> dict:
+def get_worldpop_population_no_cache(
+    lat: float, lon: float, radius_m: int = 1000
+) -> dict:
     iso3 = get_country_iso3(lat, lon)
     if not iso3:
         return {"population": 0, "source": "worldpop", "error": "no_country"}
@@ -586,29 +590,34 @@ def get_worldpop_population_no_cache(lat: float, lon: float) -> dict:
                 transformer = Transformer.from_crs("EPSG:4326", ds.crs, always_xy=True)
                 x, y = transformer.transform(lon, lat)
 
-                if not (
-                    ds.bounds.left <= x <= ds.bounds.right
-                    and ds.bounds.bottom <= y <= ds.bounds.top
-                ):
-                    return {"population": 0, "source": "worldpop"}
+                # Pixel size (meters)
+                px_w = abs(ds.transform.a)
+                px_h = abs(ds.transform.e)
+
+                radius_px_x = int(radius_m / px_w)
+                radius_px_y = int(radius_m / px_h)
 
                 row, col = ds.index(x, y)
-                value = ds.read(1, window=((row, row + 1), (col, col + 1)))[0, 0]
 
-                pop = (
-                    WORLDPOP_NODATA_DEFAULT
-                    if value is None or value == ds.nodata
-                    else int(value)
+                window = Window(
+                    col - radius_px_x,
+                    row - radius_px_y,
+                    radius_px_x * 2,
+                    radius_px_y * 2,
                 )
 
+                data = ds.read(1, window=window, masked=True)
+
+                pop = float(data.sum())
+
                 return {
-                    "population": pop,
+                    "population": round(pop, 2),
                     "source": "worldpop",
                     "year": WORLDPOP_YEAR,
                     "iso3": iso3,
                 }
 
-    except RasterioIOError as e:
+    except rasterio.errors.RasterioIOError as e:
         print(f"[WorldPop raster open error] {e}")
         return {"population": 0, "source": "worldpop", "error": "raster_open_failed"}
 
