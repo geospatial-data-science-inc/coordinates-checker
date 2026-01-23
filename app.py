@@ -810,8 +810,7 @@ def point_to_geojson(lat, lon, delta=0.01):
     }
 
 
-def get_worldpop_population_no_cache(lat: float, lon: float) -> dict:
-    iso3 = get_country_iso3(lat, lon)
+def get_worldpop_population_no_cache(lat: float, lon: float, iso3: str) -> dict:
     if not iso3:
         return {"population": 0, "source": "worldpop", "error": "no_country"}
 
@@ -894,12 +893,13 @@ def run_query_for_miss(
     is_water_check: bool = False,
     is_worldpop: bool = False,
     is_nominatim: bool = False,
+    iso3: Optional[str] = None,
 ) -> Tuple[str, Any]:
     """Executes the slow I/O operations for a single cache miss."""
     res = None
     try:
         if is_worldpop:
-            res = get_worldpop_population_no_cache(lat, lon)
+            res = get_worldpop_population_no_cache(lat, lon, iso3)
         elif is_nominatim:
             res = nominatim_lookup_no_cache(lat, lon)
         elif is_water_check:
@@ -932,6 +932,7 @@ executor = ThreadPoolExecutor(max_workers=20)
 def validate_batch():
     data = request.json
     coords = data.get("coordinates", [])
+    iso3 = data.get("iso3", None)
     if not coords:
         return jsonify({"error": "No coordinates provided"}), 400
 
@@ -1018,6 +1019,7 @@ def validate_batch():
                 True,
                 False,
                 i,
+                iso3,
             ),
             (
                 f"nominatim_{lat_r}_{lon_r}",
@@ -1127,10 +1129,12 @@ def validate_batch():
 
 
 def single_query_with_executor(
-    key_data: Tuple[str, float, float, str, str, Optional[callable], bool, bool, bool],
+    key_data: Tuple[
+        str, float, float, str, str, Optional[callable], bool, bool, bool, Optional[str]
+    ],
 ):
     # Uses the executor-driven logic for high performance on external calls and batch cache writes
-    key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom = key_data
+    key, lat, lon, table, type_, overpass_fn, is_w_c, is_wp, is_nom, iso3 = key_data
 
     cached = get_cache_batch([key]).get(key)
     if cached is not None:
@@ -1148,6 +1152,7 @@ def single_query_with_executor(
         is_w_c,
         is_wp,
         is_nom,
+        iso3=iso3 if is_wp else None,
     )
     key, res = future.result()
 
@@ -1166,12 +1171,25 @@ def worldpop():
     try:
         lat = float(request.args.get("lat") or request.args.get("latitude"))
         lon = float(request.args.get("lon") or request.args.get("longitude"))
+        iso2 = request.args.get("country")
+        iso3 = ISO2_TO_ISO3.get(iso2.upper()) if iso2 else get_country_iso3(lat, lon)
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
 
     lat_r = round(lat, 4)
     lon_r = round(lon, 4)
-    key_data = (f"worldpop_{lat_r}_{lon_r}", lat, lon, "", "", None, False, True, False)
+    key_data = (
+        f"worldpop_{lat_r}_{lon_r}",
+        lat,
+        lon,
+        "",
+        "",
+        None,
+        False,
+        True,
+        False,
+        iso3,
+    )
     result = single_query_with_executor(key_data)
     print(f"the result: {result}")
     return jsonify(result or {"population": 0, "source": "failed"})
@@ -1197,6 +1215,7 @@ def nominatim():
         False,
         False,
         True,
+        None,
     )
     result = single_query_with_executor(key_data)
 
@@ -1223,6 +1242,7 @@ def building_distance():
         False,
         False,
         False,
+        "",
     )
     row = single_query_with_executor(key_data)
 
@@ -1270,6 +1290,7 @@ def road_distance():
         False,
         False,
         False,
+        "",
     )
     row = single_query_with_executor(key_data)
 
@@ -1323,6 +1344,7 @@ def water_check():
         True,
         False,
         False,
+        "",
     )
     on_water = single_query_with_executor(key_data)
     print(f"water check result: {on_water}")
@@ -1373,6 +1395,7 @@ def overture_match():
         False,
         False,
         False,
+        "",
     )
     row = single_query_with_executor(key_data)
 

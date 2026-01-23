@@ -189,14 +189,12 @@ const csvTemplateHeaders = [
 ];
 
 const API_CONFIG = {
-  worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: " http://127.0.0.1:5000/api/worldpop",
+  nominatim: " http://127.0.0.1:5000/api/nominatim",
+  overture: " http://127.0.0.1:5000/api/overture_match",
+  road_distance: " http://127.0.0.1:5000/api/road_distance",
+  building_distance: " http://127.0.0.1:5000/api/building_distance",
+  water_check: " http://127.0.0.1:5000/api/water_check",
 };
 
 document
@@ -769,7 +767,11 @@ async function validateCoordinates() {
       updateCheckStatus(index, "population", "loading");
       try {
         const popResp = await fetch(
-          `${API_CONFIG.worldpop}?latitude=${y}&longitude=${x}`
+          `${
+            API_CONFIG.worldpop
+          }?latitude=${y}&longitude=${x}&country=${countryAlpha2Map[
+            country
+          ].toUpperCase()}`
         );
         const popData = await popResp.json();
         const population = popData.population || 0;
