@@ -178,17 +178,23 @@ const countryAlpha2Map = {
   NG: "ng",
 };
 
-const csvTemplateHeaders = ["Name", "x", "y", "Admin1", "Admin2", "Admin3"];
+const csvTemplateHeaders = [
+  "Id",
+  "Name",
+  "x",
+  "y",
+  "Admin1",
+  "Admin2",
+  "Admin3",
+];
 
 const API_CONFIG = {
-  worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: " http://127.0.0.1:5000/api/worldpop",
+  nominatim: " http://127.0.0.1:5000/api/nominatim",
+  overture: " http://127.0.0.1:5000/api/overture_match",
+  road_distance: " http://127.0.0.1:5000/api/road_distance",
+  building_distance: " http://127.0.0.1:5000/api/building_distance",
+  water_check: " http://127.0.0.1:5000/api/water_check",
 };
 
 document
@@ -315,7 +321,7 @@ function handleScenarioUpload(e) {
 
         x: parseFloat(row["Longitude (X)"]),
         y: parseFloat(row["Latitude (Y)"]),
-
+        id: row["Id"] || "",
         Admin1: row["Admin1"] || "",
         Admin2: row["Admin2"] || "",
         Admin3: row["Admin3"] || "",
@@ -1031,33 +1037,34 @@ function updateResultsTable(results) {
 
     return {
       DT_RowClass: rowClass,
-      0: f.Name || "Unknown",
-      1: f.x || "",
-      2: f.y || "",
-      3: f.Admin1 || "",
-      4: f.Admin2 || "",
-      5: f.Admin3 || "",
-      6: f.error
+      0: f.id || "",
+      1: f.Name || "Unknown",
+      2: f.x || "",
+      3: f.y || "",
+      4: f.Admin1 || "",
+      5: f.Admin2 || "",
+      6: f.Admin3 || "",
+      7: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.countryBoundary?.valid ? "bg-success" : "bg-danger"
           }">${f.countryBoundary?.valid ? "Pass" : "Fail"}</span>`,
-      7: f.error
+      8: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<div>${f.adminAreaMatch?.osmAdminName || "N/A"}</small></div>`,
-      8: f.error
+      9: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<div class="admin-comparison">   
              <div><span class="badge ${
                f.adminAreaMatch?.valid ? "bg-success" : "bg-warning"
              }">${f.adminAreaMatch?.valid ? "Pass" : "Fail"}</span></div>
            </div>`,
-      9: f.error
+      10: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.duplicateCheck?.valid ? "bg-success" : "bg-warning"
           }">${f.duplicateCheck?.valid ? "Pass" : "Fail"}</span>`,
-      10: f.error
+      11: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.roadDistance?.valid ? "bg-success" : "bg-warning"
@@ -1066,15 +1073,15 @@ function updateResultsTable(results) {
               ? f.roadDistance?.distance.toFixed(2)
               : "N/A"
           }</span>`,
-      11: f.error
+      12: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<div>${f.roadDistance?.id || "N/A"}</small></div>`,
-      12: f.error
+      13: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             !f.waterCheck?.on_water ? "bg-success" : "bg-danger"
           }">${!f.waterCheck?.on_water ? "Pass" : "Fail"}</span>`,
-      13: f.error
+      14: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.buildingDistance?.valid ? "bg-success" : "bg-warning"
@@ -1084,10 +1091,10 @@ function updateResultsTable(results) {
               ? f.buildingDistance?.distance.toFixed(2)
               : "N/A"
           }</span>`,
-      14: f.error
+      15: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<div>${f.buildingDistance?.id || "N/A"}</small></div>`,
-      15: f.error
+      16: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.populationDensity?.valid ? "bg-success" : "bg-warning"
@@ -1096,7 +1103,7 @@ function updateResultsTable(results) {
               ? f.populationDensity.population.toLocaleString()
               : "N/A"
           }</span>`,
-      16: f.error
+      17: f.error
         ? '<span class="badge bg-secondary">Error</span>'
         : `<span class="badge ${
             f.category === "Valid"
