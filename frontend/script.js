@@ -189,14 +189,12 @@ const csvTemplateHeaders = [
 ];
 
 const API_CONFIG = {
-  worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: "  http://127.0.0.1:5000/api/worldpop",
+  nominatim: "  http://127.0.0.1:5000/api/nominatim",
+  overture: "  http://127.0.0.1:5000/api/overture_match",
+  road_distance: "  http://127.0.0.1:5000/api/road_distance",
+  building_distance: "  http://127.0.0.1:5000/api/building_distance",
+  water_check: "  http://127.0.0.1:5000/api/water_check",
 };
 
 document
@@ -214,10 +212,23 @@ document
 function handleFileUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
+
   Papa.parse(file, {
     header: true,
+    skipEmptyLines: true,
     complete: function (results) {
-      uploadedData = results.data.filter((r) => r.Name && r.x && r.y);
+      uploadedData = results.data
+        .filter((r) => r.Name && r.x && r.y)
+        .map((r, idx) => ({
+          Id: r.Id ?? r.id ?? `${idx + 1}`, // ← THIS IS THE FIX
+          Name: r.Name,
+          x: r.x,
+          y: r.y,
+          Admin1: r.Admin1 || "",
+          Admin2: r.Admin2 || "",
+          Admin3: r.Admin3 || "",
+        }));
+
       updateValidateButton();
       updateDataSummary();
       updateStats();
@@ -323,7 +334,7 @@ function handleScenarioUpload(e) {
 
         x: parseFloat(row["Longitude (X)"]),
         y: parseFloat(row["Latitude (Y)"]),
-        id: row["Id"] || "",
+        Id: row["Id"] || "",
         Admin1: row["Admin1"] || "",
         Admin2: row["Admin2"] || "",
         Admin3: row["Admin3"] || "",
@@ -575,7 +586,7 @@ async function validateCoordinates() {
 
   const country = document.getElementById("countrySelect").value;
   const results = [];
-  const batchSize = 10;
+  const batchSize = 5;
 
   // Show progress section
   document.getElementById("progressSection").style.display = "block";
