@@ -1043,7 +1043,7 @@ function updateResultsTable(results) {
 
     return {
       DT_RowClass: rowClass,
-      0: f.id || "",
+      0: f.Id || "",
       1: f.Name || "Unknown",
       2: f.x || "",
       3: f.y || "",
@@ -1230,7 +1230,6 @@ function showMethodology() {
                 <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
                 <li><strong>Resolution:</strong> 100m × 100m grid</li>
                 <li><strong>Impact:</strong> Location Accuracy Flags if population ≤ 100</li>
-                <li><strong>Validation:</strong> Minimum 100 people within ~1km radius</li>
               </ul>
             </div>
             
