@@ -223,9 +223,6 @@ def flush_cache_buffer(force=False):
     pass
 
 
-# atexit.register(lambda: flush_cache_buffer(force=True))
-
-
 # -----------------------------
 # External API & DB setups (Minimal modification: remove redundant single-key cache logic)
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -500,7 +497,7 @@ ISO2_TO_ISO3 = {
 
 def validate_worldpop_url():
     test_url = (
-        f"{R2_BASE_URL}/{WORLDPOP_YEAR}/NGA/" f"nga_ppp_{WORLDPOP_YEAR}_UNadj_COG.tif"
+        f"{R2_BASE_URL}/{WORLDPOP_YEAR}/UGA/" f"uga_ppp_{WORLDPOP_YEAR}_UNadj_COG.tif"
     )
     try:
         with rasterio.Env(
@@ -1068,12 +1065,8 @@ def validate_batch():
         key, result = future.result()
         cache_data[key] = result
 
-        if key.startswith("worldpop_"):
-            if result and result.get("source") == "worldpop":
-                new_data_to_cache[key] = result
-        else:
-            if result is not None:
-                new_data_to_cache[key] = result
+        if is_cacheable_result(result):
+            new_data_to_cache[key] = result
 
     # 4. Batch Write to Cache (MSET/Pipeline) - HIGH SPEED
     if new_data_to_cache:
@@ -1123,9 +1116,55 @@ def validate_batch():
     return jsonify({"results": final_results})
 
 
-# --- Individual Endpoints (Now use the single-query helper pattern for efficiency) ---
-# NOTE: The single endpoints are now executed synchronously using the optimized batch functions for caching,
-# but they are still inherently slower than the batch endpoint for multiple queries.
+def is_cacheable_result(res: Any) -> bool:
+    """
+    Returns True only if a result is safe to cache.
+    Applies to ALL data sources uniformly.
+    """
+    if res is None:
+        return False
+
+    # All successful results in this system are dicts
+    if not isinstance(res, dict):
+        return False
+
+    # Explicit failure signals
+    if res.get("source") in {"failed", "error"}:
+        return False
+
+    if "error" in res:
+        return False
+
+    # Reject empty or placeholder payloads
+    if len(res) == 0:
+        return False
+
+    # Reject known "soft failures"
+    if (
+        res.get("on_water") is False
+        and res.get("id") is None
+        and res.get("source") == "overture"
+    ):
+        # overture_water_check failure shape
+        return False
+
+    # Reject nominatim failure payloads
+    if (
+        res.get("source") == "nominatim"
+        and "address" not in res
+        and "display_name" not in res
+    ):
+        return False
+
+    # Reject WorldPop failure shapes
+    if res.get("source") == "worldpop" and "population" not in res:
+        return False
+
+    # Reject DuckDB / Overpass shells without distance
+    if res.get("source") in {"duckdb", "overpass"} and "distance" not in res:
+        return False
+
+    return True
 
 
 def single_query_with_executor(
@@ -1156,12 +1195,8 @@ def single_query_with_executor(
     )
     key, res = future.result()
 
-    if is_wp:
-        if res and res.get("source") == "worldpop":
-            set_cache_batch({key: res})
-    else:
-        if res is not None:
-            set_cache_batch({key: res})
+    if is_cacheable_result(res):
+        set_cache_batch({key: res})
 
     return res
 
@@ -1173,6 +1208,7 @@ def worldpop():
         lon = float(request.args.get("lon") or request.args.get("longitude"))
         iso2 = request.args.get("country")
         iso3 = ISO2_TO_ISO3.get(iso2.upper()) if iso2 else get_country_iso3(lat, lon)
+        print(f"Resolved ISO3: {iso3} for country code: {iso2}")
     except:
         return jsonify({"error": "Invalid coordinates"}), 400
 
