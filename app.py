@@ -497,7 +497,7 @@ ISO2_TO_ISO3 = {
 
 def validate_worldpop_url():
     test_url = (
-        f"{R2_BASE_URL}/{WORLDPOP_YEAR}/UGA/" f"uga_ppp_{WORLDPOP_YEAR}_UNadj_COG.tif"
+        f"{R2_BASE_URL}/{WORLDPOP_YEAR}/ZMB/" f"zmb_ppp_{WORLDPOP_YEAR}_UNadj_COG.tif"
     )
     try:
         with rasterio.Env(
@@ -822,6 +822,9 @@ def get_worldpop_population_no_cache(lat: float, lon: float, iso3: str) -> dict:
             CPL_VSIL_CURL_ALLOWED_EXTENSIONS="tif",
         ):
             with rasterio.open(tif_url) as ds:
+                if ds.crs is None:
+                    raise ValueError("Raster has no CRS")
+
                 transformer = Transformer.from_crs("EPSG:4326", ds.crs, always_xy=True)
                 x, y = transformer.transform(lon, lat)
 
@@ -829,16 +832,21 @@ def get_worldpop_population_no_cache(lat: float, lon: float, iso3: str) -> dict:
                     ds.bounds.left <= x <= ds.bounds.right
                     and ds.bounds.bottom <= y <= ds.bounds.top
                 ):
-                    return {"population": 0, "source": "worldpop"}
+                    return {
+                        "population": 0,
+                        "source": "worldpop",
+                        "error": "out_of_bounds",
+                    }
 
                 row, col = ds.index(x, y)
                 value = ds.read(1, window=((row, row + 1), (col, col + 1)))[0, 0]
 
-                pop = (
-                    WORLDPOP_NODATA_DEFAULT
-                    if value is None or value == ds.nodata
-                    else int(value)
-                )
+                value = float(value)
+
+                if value == ds.nodata or value < 0:
+                    pop = 0
+                else:
+                    pop = int(round(value))
 
                 return {
                     "population": pop,
@@ -849,11 +857,19 @@ def get_worldpop_population_no_cache(lat: float, lon: float, iso3: str) -> dict:
 
     except RasterioIOError as e:
         print(f"[WorldPop raster open error] {e}")
-        return {"population": 0, "source": "worldpop", "error": "raster_open_failed"}
+        return {
+            "population": 0,
+            "source": "worldpop",
+            "error": "raster_open_failed",
+        }
 
     except Exception as e:
         print(f"[WorldPop raster read error] {e}")
-        return {"population": 0, "source": "worldpop", "error": "read_failed"}
+        return {
+            "population": 0,
+            "source": "worldpop",
+            "error": "read_failed",
+        }
 
 
 last_nominatim_call = 0
