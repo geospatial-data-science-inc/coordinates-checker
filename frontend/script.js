@@ -176,6 +176,7 @@ const countryAlpha2Map = {
   ZM: "zm",
   ZW: "zw",
   NG: "ng",
+  CD: "cd",
 };
 
 const csvTemplateHeaders = [
@@ -192,8 +193,10 @@ const API_CONFIG = {
   worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
   nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
   overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance: " https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance: " https://coordinates-checker-dc59.onrender.com/api/building_distance",
+  road_distance:
+    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
+  building_distance:
+    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
   water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
 };
 
@@ -334,7 +337,7 @@ function handleScenarioUpload(e) {
 
         x: parseFloat(row["Longitude (X)"]),
         y: parseFloat(row["Latitude (Y)"]),
-        Id: row["Id"] || "",
+        Id: row["ID"] || "",
         Admin1: row["Admin1"] || "",
         Admin2: row["Admin2"] || "",
         Admin3: row["Admin3"] || "",
