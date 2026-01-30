@@ -1163,145 +1163,127 @@ function updateApiStatus(msg, type = "info") {
 function showMethodology() {
   // Create methodology modal content
   const methodologyContent = `
-    <div class="modal fade" id="methodologyModal" tabindex="-1" aria-labelledby="methodologyModalLabel" aria-hidden="true">
-      <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-          <div class="modal-header">
-            <h5 class="modal-title" id="methodologyModalLabel">
-              <i class="fas fa-info-circle me-2"></i>Validation Methodology
-            </h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-          </div>
-          <div class="modal-body">
-            <div class="methodology-section">
-              <h6><i class="fas fa-globe-americas me-2"></i>Country Boundary Check</h6>
-              <p>Uses Nominatim reverse geocoding to verify coordinates are within the selected country.</p>
-              <ul>
-                <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
-                <li><strong>Impact:</strong> Immediate fail if incorrect</li>
-                <li><strong>Validation:</strong> Compares country code from coordinates with selected country</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-water me-2"></i>Water Body Check</h6>
-              <p>Checks if coordinates fall on water bodies (rivers, lakes, oceans).</p>
-              <ul>
-                <li><strong>Source:</strong> Overture API water features query</li>
-                <li><strong>Radius:</strong> 50 meters search radius</li>
-                <li><strong>Impact:</strong> Immediate fail if on water</li>
-                <li><strong>Validation:</strong> Points should not be on water bodies</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-map-pin me-2"></i>Administrative Area Match</h6>
-              <p>Compares Admin1 level from uploaded data with OSM administrative boundaries.</p>
-              <ul>
-                <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
-                <li><strong>Impact:</strong> Data Consistency Review if mismatch</li>
-                <li><strong>Method:</strong> Fuzzy matching of Admin1 names after normalization</li>
-                <li><strong>Display:</strong> Shows both uploaded name and OSM name for comparison</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-copy me-2"></i>Duplicate Check</h6>
-              <p>Identifies coordinates that are very close to each other (within 0.001 degrees).</p>
-              <ul>
-                <li><strong>Threshold:</strong> 0.001 degrees (~111 meters)</li>
-                <li><strong>Impact:</strong> Data Consistency Review if duplicates found</li>
-                <li><strong>Purpose:</strong> Prevents duplicate facility entries</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-road me-2"></i>Road Distance</h6>
-              <p>Calculates distance to nearest road using Overture Maps transportation data with Overpass API fallback.</p>
-              <ul>
-                <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
-                <li><strong>Fallback:</strong> Overpass API for road networks</li>
-                <li><strong>Impact:</strong> Location Accuracy Flags if no road within 500m</li>
-                <li><strong>Optimal:</strong> Distance ≤ 100 meters</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-building me-2"></i>Building Distance</h6>
-              <p>Finds distance to nearest building using Overture Maps building data with Overpass API fallback.</p>
-              <ul>
-                <li><strong>Primary Source:</strong> Overture Maps (DuckDB query)</li>
-                <li><strong>Fallback:</strong> Overpass API for building data</li>
-                <li><strong>Impact:</strong> Location Accuracy Flags if no building within 200m</li>
-                <li><strong>Optimal:</strong> Distance ≤ 50 meters</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-users me-2"></i>Population Density</h6>
-              <p>Estimates population within ~1km radius using WorldPop dataset.</p>
-              <ul>
-                <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
-                <li><strong>Resolution:</strong> 100m × 100m grid</li>
-                <li><strong>Impact:</strong> Location Accuracy Flags if population ≤ 100</li>
-              </ul>
-            </div>
-            
-            <div class="methodology-section">
-              <h6><i class="fas fa-list-check me-2"></i>Categorical Validation System</h6>
-              <p>Facilities are categorized based on validation results:</p>
-              <table class="table table-sm">
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Conditions</th>
-                    <th>Action Required</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr class="table-danger">
-                    <td><strong>Invalid</strong></td>
-                    <td>Wrong country OR on water body</td>
-                    <td>Immediate correction needed</td>
-                  </tr>
-                  <tr class="table-warning">
-                    <td><strong>Data Consistency Review</strong></td>
-                    <td>Duplicate coordinates OR Admin1 mismatch</td>
-                    <td>Review data consistency and administrative boundaries</td>
-                  </tr>
-                  <tr class="table-warning">
-                    <td><strong>Location Accuracy Flags</strong></td>
-                    <td>No road nearby OR No building nearby OR Low population</td>
-                    <td>Verify coordinate accuracy and physical plausibility</td>
-                  </tr>
-                  <tr class="table-success">
-                    <td><strong>Valid</strong></td>
-                    <td>All checks pass</td>
-                    <td>No action required</td>
-                  </tr>
-                </tbody>
-              </table>
-              <p class="mt-2">
-                <strong>Category Interpretation:</strong><br>
-                • <span class="text-success">Valid</span>: All checks pass - coordinates are reliable<br>
-                • <span class="text-warning">Data Consistency Review</span>: Potential data entry or administrative issues<br>
-                • <span class="text-warning">Location Accuracy Flags</span>: Physical location may be inaccurate<br>
-                • <span class="text-danger">Invalid</span>: Fundamental errors requiring immediate correction
-              </p>
-            </div>
-            
-            <div class="alert alert-info mt-3">
-              <i class="fas fa-lightbulb me-2"></i>
-              <strong>Note:</strong> All API calls are cached for performance. Processing time depends on number of facilities and API availability.
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-          </div>
+<div class="modal fade" id="methodologyModal" tabindex="-1" aria-labelledby="methodologyModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="methodologyModalLabel">
+          <i class="fas fa-info-circle me-2"></i>Validation Methodology
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="methodology-section">
+          <h6><i class="fas fa-globe-americas me-2"></i>Country Boundary Check</h6>
+          <p>Uses <strong>Nominatim</strong> reverse geocoding to verify coordinates are within the selected country.</p>
+          <ul>
+            <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
+            <li><strong>Impact:</strong> Immediate fail if coordinates are outside the selected country</li>
+            <li><strong>Validation:</strong> Compares ISO3 country code from coordinates with user-provided or inferred country</li>
+          </ul>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-water me-2"></i>Water Body Check</h6>
+          <p>Checks whether coordinates lie on water bodies using <strong>Overture Maps</strong> DuckDB queries with Overpass fallback.</p>
+          <ul>
+            <li><strong>Source:</strong> Overture Maps (DuckDB) / Overpass API</li>
+            <li><strong>Impact:</strong> Immediate fail if point is on water</li>
+            <li><strong>Validation:</strong> Detects rivers, lakes, oceans, and intermittent water bodies</li>
+          </ul>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-map-pin me-2"></i>Administrative Area Match</h6>
+          <p>Compares uploaded administrative areas (Admin1) against OSM boundaries via Nominatim.</p>
+          <ul>
+            <li><strong>Source:</strong> OpenStreetMap Nominatim API</li>
+            <li><strong>Impact:</strong> Data consistency review if mismatch</li>
+            <li><strong>Method:</strong> Fuzzy matching normalized names</li>
+          </ul>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-copy me-2"></i>Duplicate Check</h6>
+          <p>Detects coordinates that are very close (<0.001° ≈ 111 m) to prevent duplicate entries.</p>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-road me-2"></i>Road Distance</h6>
+          <p>Calculates distance to nearest road using Overture Maps transportation data with Overpass API fallback.</p>
+          <ul>
+            <li><strong>Optimal:</strong> Distance ≤ 100 meters</li>
+            <li><strong>Impact:</strong> Location accuracy flag if no road within 500 m</li>
+          </ul>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-building me-2"></i>Building Distance</h6>
+          <p>Finds distance to nearest building using Overture Maps building data with Overpass fallback.</p>
+          <ul>
+            <li><strong>Optimal:</strong> Distance ≤ 50 meters</li>
+            <li><strong>Impact:</strong> Location accuracy flag if no building within 200 m</li>
+          </ul>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-users me-2"></i>Population Density</h6>
+          <p>Estimates population within ~1 km radius using <strong>WorldPop</strong> high-resolution raster datasets.</p>
+          <ul>
+            <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
+            <li><strong>Resolution:</strong> 100 × 100 m grids</li>
+            <li><strong>Impact:</strong> Location accuracy flag if population ≤ 0</li>
+          </ul>
+        </div>
+
+        <div class="methodology-section">
+          <h6><i class="fas fa-list-check me-2"></i>Categorical Validation System</h6>
+          <p>Coordinates are categorized based on validation results:</p>
+          <table class="table table-sm">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Conditions</th>
+                <th>Action Required</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="table-danger">
+                <td><strong>Invalid</strong></td>
+                <td>Wrong country OR on water body</td>
+                <td>Immediate correction needed</td>
+              </tr>
+              <tr class="table-warning">
+                <td><strong>Data Consistency Review</strong></td>
+                <td>Duplicate coordinates OR Admin1 mismatch</td>
+                <td>Review administrative data and duplicates</td>
+              </tr>
+              <tr class="table-warning">
+                <td><strong>Location Accuracy Flags</strong></td>
+                <td>No road nearby OR No building nearby OR Low population</td>
+                <td>Verify coordinate accuracy and physical plausibility</td>
+              </tr>
+              <tr class="table-success">
+                <td><strong>Valid</strong></td>
+                <td>All checks pass</td>
+                <td>No action required</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="alert alert-info mt-3">
+          <i class="fas fa-lightbulb me-2"></i>
+          <strong>Note:</strong> All queries are cached via Upstash Redis for performance. Processing speed depends on number of coordinates, API availability, and concurrent executor limits.
         </div>
       </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
     </div>
-  `;
+  </div>
+</div>
+`;
 
   // Add modal to DOM if not already present
   let modal = document.getElementById("methodologyModal");
