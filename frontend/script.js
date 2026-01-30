@@ -1204,9 +1204,14 @@ function showMethodology() {
         </div>
 
         <div class="methodology-section">
-          <h6><i class="fas fa-copy me-2"></i>Duplicate Check</h6>
-          <p>Detects coordinates that are very close (<0.001° ≈ 111 m) to prevent duplicate entries.</p>
-        </div>
+              <h6><i class="fas fa-copy me-2"></i>Duplicate Check</h6>
+              <p>Identifies coordinates that are very close to each other (within 0.001 degrees).</p>
+              <ul>
+                <li><strong>Threshold:</strong> 0.001 degrees (~111 meters)</li>
+                <li><strong>Impact:</strong> Data Consistency Review if duplicates found</li>
+                <li><strong>Purpose:</strong> Prevents duplicate facility entries</li>
+              </ul>
+            </div>
 
         <div class="methodology-section">
           <h6><i class="fas fa-road me-2"></i>Road Distance</h6>
@@ -1270,6 +1275,13 @@ function showMethodology() {
               </tr>
             </tbody>
           </table>
+          <p class="mt-2">
+                <strong>Category Interpretation:</strong><br>
+                • <span class="text-success">Valid</span>: All checks pass - coordinates are reliable<br>
+                • <span class="text-warning">Data Consistency Review</span>: Potential data entry or administrative issues<br>
+                • <span class="text-warning">Location Accuracy Flags</span>: Physical location may be inaccurate<br>
+                • <span class="text-danger">Invalid</span>: Fundamental errors requiring immediate correction
+              </p>
         </div>
 
         <div class="alert alert-info mt-3">
