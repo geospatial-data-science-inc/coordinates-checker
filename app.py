@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+
 import duckdb
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
@@ -656,47 +656,6 @@ def get_country_iso3(lat: float, lon: float) -> Optional[str]:
         return None
 
 
-# def overture_water_check(lat: float, lon: float) -> bool:
-#     """
-#     Returns True if the point is on water (ocean, sea, lake, river).
-#     Uses Overture base:water with bbox pruning + ST_Contains.
-#     """
-
-#     lat_r = round(lat, 4)
-#     lon_r = round(lon, 4)
-
-#     path_pattern = (
-#         "s3://overturemaps-us-west-2/"
-#         "release/2025-12-17.0/theme=base/type=water/*"
-#     )
-
-#     query = f"""
-#     SELECT 1
-#     FROM read_parquet(
-#         '{path_pattern}',
-#         filename=true,
-#         hive_partitioning=1
-#     )
-#     WHERE
-#         -- FAST bbox pruning (struct comparison, no spatial funcs)
-#         bbox.xmin <= {lon_r}
-#         AND bbox.xmax >= {lon_r}
-#         AND bbox.ymin <= {lat_r}
-#         AND bbox.ymax >= {lat_r}
-
-#         -- Exact geometry test
-#         AND ST_Contains(
-#             geometry,
-#             ST_Point({lon_r}, {lat_r})::GEOMETRY
-#         )
-#     LIMIT 1;
-#     """
-
-#     try:
-#         return conn.execute(query).fetchone() is not None
-#     except Exception as e:
-#         print(f"[DuckDB water check error] {e}")
-#         return False
 
 
 def overture_water_check(lat: float, lon: float) -> dict:
@@ -935,8 +894,12 @@ def run_query_for_miss(
 # -----------------------------
 # Flask App and Endpoints (OPTIMIZED)
 
-app = Flask(__name__)
-CORS(app)
+app = Flask(
+    __name__,
+    static_folder="public",
+    static_url_path=""
+)
+
 # Use the executor to parallelize external API/DB calls
 executor = ThreadPoolExecutor(max_workers=20)
 
@@ -1491,7 +1454,9 @@ def health():
             "cache_backend": backend,
         }
     )
-
+@app.route("/")
+def serve_frontend():
+    return app.send_static_file("index.html")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))

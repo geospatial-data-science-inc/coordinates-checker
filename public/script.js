@@ -190,14 +190,12 @@ const csvTemplateHeaders = [
 ];
 
 const API_CONFIG = {
-  worldpop: " https://coordinates-checker-dc59.onrender.com/api/worldpop",
-  nominatim: " https://coordinates-checker-dc59.onrender.com/api/nominatim",
-  overture: " https://coordinates-checker-dc59.onrender.com/api/overture_match",
-  road_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/road_distance",
-  building_distance:
-    " https://coordinates-checker-dc59.onrender.com/api/building_distance",
-  water_check: " https://coordinates-checker-dc59.onrender.com/api/water_check",
+  worldpop: "/api/worldpop",
+  nominatim: "/api/nominatim",
+  overture: "/api/overture_match",
+  road_distance: "/api/road_distance",
+  building_distance: "/api/building_distance",
+  water_check: "/api/water_check",
 };
 
 document
@@ -711,7 +709,6 @@ async function validateCoordinates() {
           `${API_CONFIG.road_distance}?lat=${y}&lon=${x}`
         );
         const roadData = await roadResp.json();
-        console.log("road", roadData);
         f.roadDistance = {
           valid: roadData.valid || false,
           id: roadData.id || null,
