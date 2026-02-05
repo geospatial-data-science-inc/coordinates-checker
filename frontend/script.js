@@ -1233,11 +1233,11 @@ function showMethodology() {
 
         <div class="methodology-section">
           <h6><i class="fas fa-users me-2"></i>Population Density</h6>
-          <p>Estimates population within ~1 km radius using <strong>WorldPop</strong> high-resolution raster datasets.</p>
+          <p>Estimates population at the point location using <strong>WorldPop</strong> high-resolution raster data by sampling the single 100 × 100 m grid cell containing the coordinate (no buffering or aggregation)..</p>
           <ul>
             <li><strong>Source:</strong> WorldPop Global High Resolution Population (2020)</li>
             <li><strong>Resolution:</strong> 100 × 100 m grids</li>
-            <li><strong>Impact:</strong> Location accuracy flag if population ≤ 0</li>
+            <li><strong>Impact:</strong> Location accuracy flag if population = 0 (or no-data)</li>
           </ul>
         </div>
 
