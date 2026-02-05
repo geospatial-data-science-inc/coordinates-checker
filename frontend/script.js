@@ -278,10 +278,10 @@ function updateDataSummary() {
           <p><strong>Facilities:</strong> ${uploadedData.length}</p>
           <p><strong>X range:</strong> ${
             xVals.length ? Math.min(...xVals).toFixed(4) : "N/A"
-          } - ${xVals.length ? Math.max(...xVals).toFixed(4) : "N/A"}</p>
+          } to ${xVals.length ? Math.max(...xVals).toFixed(4) : "N/A"}</p>
           <p><strong>Y range:</strong> ${
             yVals.length ? Math.min(...yVals).toFixed(4) : "N/A"
-          } - ${yVals.length ? Math.max(...yVals).toFixed(4) : "N/A"}</p>
+          } to ${yVals.length ? Math.max(...yVals).toFixed(4) : "N/A"}</p>
         </div>
       `;
 }
