@@ -177,6 +177,7 @@ const countryAlpha2Map = {
   ZW: "zw",
   NG: "ng",
   CD: "cd",
+  TD: "td",
 };
 
 const csvTemplateHeaders = [
