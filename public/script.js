@@ -802,7 +802,7 @@ async function validateCoordinates() {
 
   const country = document.getElementById("countrySelect").value;
   const results = [];
-  const batchSize = 10;
+  const batchSize = 20;
 
   // Show progress section
   document.getElementById("progressSection").style.display = "block";
