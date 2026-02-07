@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Health Facility GPS Validation Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/icon.ico" type="image/x-icon">
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <!-- Font Awesome for icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- DataTables CSS + Extensions -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/searchpanes/2.2.0/css/searchPanes.dataTables.min.css" />
+  <link rel="stylesheet" href="https://cdn.datatables.net/select/1.7.0/css/select.dataTables.min.css" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0/css/select2.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet"
+    href="https://api.mapbox.com/mapbox.js/plugins/leaflet-fullscreen/v1.0.1/leaflet.fullscreen.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css">
+
+
+</head>
+
+<body>
+  <div class="dashboard-wrapper">
+    <!-- Mobile Menu Toggle -->
+    <button class="mobile-menu-toggle" id="mobileMenuToggle">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- Sidebar -->
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <i class="fas fa-clinic-medical"></i>
+        <h3>GPS Validation</h3>
+      </div>
+
+      <!-- Dataset Source Tabs -->
+      <div class="sidebar-section">
+        <ul class="nav nav-tabs mb-3" id="datasetTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-pane"
+              type="button" role="tab">
+              <i class="fas fa-upload me-1"></i> Upload
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="scenario-tab" data-bs-toggle="tab" data-bs-target="#scenario-pane"
+              type="button" role="tab">
+              <i class="fas fa-layer-group me-1"></i> Scenarios
+            </button>
+          </li>
+
+        </ul>
+
+        <!-- Tab Content -->
+        <div class="tab-content" id="datasetTabsContent">
+          <!-- Upload Tab -->
+          <div class="tab-pane fade show active" id="upload-pane" role="tabpanel">
+            <h5>Upload New Dataset</h5>
+            <label class="form-label">Select Country</label>
+            <select class="form-select" id="countrySelect">
+              <option value="">-- Select a country --</option>
+              <option value="MW">Malawi</option>
+              <option value="KE">Kenya</option>
+              <option value="TZ">Tanzania</option>
+              <option value="UG">Uganda</option>
+              <option value="ZM">Zambia</option>
+              <option value="ZW">Zimbabwe</option>
+              <option value="NG">Nigeria</option>
+              <option value="CD">DR Congo</option>
+              <option value="TD">Chad</option>
+
+            </select>
+
+            <label class="form-label mt-3">Upload CSV File</label>
+            <input type="file" class="form-control" id="fileUpload" accept=".csv">
+
+            <div class="form-text">CSV columns: ID, Name, x (longitude), y (latitude), Admin1, Admin2, Admin3</div>
+            <div class="d-grid gap-2 mt-2">
+              <button class="btn btn-primary mt-3 w-100" id="downloadTemplateBtn">
+                <i class="fas fa-download me-2"></i> Download Template
+              </button>
+            </div>
+
+            <button class="btn btn-primary mt-3 w-100" id="validateBtn" disabled>
+              <i class="fas fa-play-circle me-2"></i>Validate Coordinates
+            </button>
+
+            <!-- <div class="d-grid gap-2 mt-3">
+              <button class="btn btn-outline-primary" id="saveToCacheBtn" disabled>
+                <i class="fas fa-save me-1"></i>Save to Cache
+              </button>
+            </div> -->
+          </div>
+
+          <!-- Cached Datasets Tab -->
+          <div class="tab-pane fade" id="scenario-pane" role="tabpanel">
+            <h5>Load Scenario</h5>
+
+            <p class="">
+              Upload a CSV containing <strong>pre-validated</strong> facilities.
+              This will instantly populate the map, results table, and statistics
+              without calling validation APIs.
+            </p>
+
+            <label class="form-label mt-3">Scenario CSV File</label>
+            <input type="file" class="form-control" id="scenarioUpload" accept=".csv" />
+
+            <div class="form-text">
+              Designed for demos, benchmarking, and offline review.
+            </div>
+
+            <div class="alert alert-info mt-3" role="alert">
+              <i class="fas fa-info-circle me-1"></i>
+              Scenario mode bypasses live validation and API calls.
+            </div>
+          </div>
+
+        </div>
+
+        <!-- API Status (Shared) -->
+        <div class="api-status mt-3" id="apiStatus">Ready for validation</div>
+
+        <!-- Overall Progress Bar (Shared) -->
+        <div class="overall-progress mt-4" id="overallProgress" style="display:none;">
+          <div class="progress-summary">
+            <span id="progressText">Processing...</span>
+            <span id="progressPercent">0%</span>
+          </div>
+          <div class="progress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" id="progressBar"
+              style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Timer (Shared) -->
+        <div id="runtimeContainer" class="runtime-box">
+          <div><small>Total Runtime:</small> <span id="totalElapsed">0s</span></div>
+          <div><small>ETA:</small> <span id="eta">Estimating…</span></div>
+        </div>
+      </div>
+
+      <!-- Existing Data Summary -->
+      <div class="sidebar-section">
+        <h5>Data Summary</h5>
+        <div id="dataSummary">
+          <div class="summary-card">
+            <p class="text-muted">No data uploaded yet</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content" id="mainContent">
+      <div class="main-header">
+        <h1><i class="fas fa-map-marked-alt me-2"></i>Health Facility GPS Validation Dashboard</h1>
+        <div class="d-flex">
+          <span class="badge bg-primary me-2">Real-time</span>
+          <span class="badge bg-success me-2">Live</span>
+          <span class="badge bg-success">version 1.0.2</span>
+
+        </div>
+      </div>
+
+      <!-- Stats Cards -->
+      <div class="stats-container" id="statsContainer">
+        <div class="stat-card stat-1">
+          <div class="stat-icon">
+            <i class="fas fa-check-circle"></i>
+          </div>
+          <div class="stat-info">
+            <h3 id="validCount">0</h3>
+            <p>Valid Facilities</p>
+          </div>
+        </div>
+        <div class="stat-card stat-2">
+          <div class="stat-icon">
+            <i class="fas fa-exclamation-triangle"></i>
+          </div>
+          <div class="stat-info">
+            <h3 id="warningCount">0</h3>
+            <p>Need Review</p>
+          </div>
+        </div>
+        <div class="stat-card stat-3">
+          <div class="stat-icon">
+            <i class="fas fa-times-circle"></i>
+          </div>
+          <div class="stat-info">
+            <h3 id="invalidCount">0</h3>
+            <p>Invalid Facilities</p>
+          </div>
+        </div>
+        <div class="stat-card stat-4">
+          <div class="stat-icon">
+            <i class="fas fa-hospital"></i>
+          </div>
+          <div class="stat-info">
+            <h3 id="totalCount">0</h3>
+            <p>Total Facilities</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Content Row -->
+      <div class="content-row">
+        <div class="content-card">
+          <h5><i class="fas fa-map me-2"></i>Map View</h5>
+          <div id="map" class="map-container"></div>
+        </div>
+        <div class="content-card">
+          <h5><i class="fas fa-table me-2"></i>Detailed Results</h5>
+          <div class="table-container">
+            <div class="table-scroll-wrapper">
+              <table class="table table-striped table-hover display nowrap" id="resultsTable" style="width:100%">
+                <thead class="table-primary">
+                  <tr>
+                    <th>ID</th>
+                    <th>Facility</th>
+                    <th>Longitude (X)</th>
+                    <th>Latitude (Y)</th>
+                    <th>Admin1</th>
+                    <th>Admin2</th>
+                    <th>Admin3</th>
+                    <th>Country</th>
+                    <th>OSM Admin Area 1</th>
+                    <th>Admin Area match</th>
+                    <th>Duplicate</th>
+                    <th>Nearby Road (m)</th>
+                    <th>Overture road ID</th>
+                    <th>On Water</th>
+                    <th>Nearby Building (m)</th>
+                    <th>Overture building ID</th>
+                    <th>Population</th>
+                    <th>Score</th>
+                  </tr>
+                </thead>
+                <tbody id="resultsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+
+      </div>
+
+      <!-- Progress Tracker -->
+      <div class="content-card" id="progressSection">
+        <h5><i class="fas fa-tasks me-2"></i>Real-Time Progress</h5>
+        <div class="progress-tracker" id="progressTracker"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.1.0/js/select2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- DataTables JS + Extensions -->
+  <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+  <script src="https://cdn.datatables.net/searchpanes/2.2.0/js/dataTables.searchPanes.min.js"></script>
+  <script src="https://cdn.datatables.net/select/1.7.0/js/dataTables.select.min.js"></script>
+  <script src="https://cdn.datatables.net/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-fullscreen/v1.0.1/Leaflet.fullscreen.min.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+
+  <script src="script.js"></script>
+
+</body>
+
+</html>
