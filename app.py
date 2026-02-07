@@ -239,7 +239,7 @@ print("[Startup] Initializing DuckDB connection...")
 conn = duckdb.connect(database=DUCKDB_FILE)
 conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
 conn.execute(
-    "SET s3_region='us-west-2'; SET memory_limit='2GB'; SET threads=4; SET enable_object_cache=true;"
+    "SET s3_region='us-west-2'; SET memory_limit='2GB'; SET threads=6; SET enable_object_cache=true;"
 )
 
 ISO2_TO_ISO3 = {
