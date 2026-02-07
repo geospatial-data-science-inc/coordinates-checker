@@ -239,7 +239,7 @@ print("[Startup] Initializing DuckDB connection...")
 conn = duckdb.connect(database=DUCKDB_FILE)
 conn.execute("INSTALL spatial; LOAD spatial; INSTALL httpfs; LOAD httpfs;")
 conn.execute(
-    "SET s3_region='us-west-2'; SET memory_limit='1GB'; SET threads=4; SET enable_object_cache=true;"
+    "SET s3_region='us-west-2'; SET memory_limit='2GB'; SET threads=2; SET enable_object_cache=true;"
 )
 
 ISO2_TO_ISO3 = {
@@ -656,8 +656,6 @@ def get_country_iso3(lat: float, lon: float) -> Optional[str]:
         return None
 
 
-
-
 def overture_water_check(lat: float, lon: float) -> dict:
     """
     Returns structured water result:
@@ -894,11 +892,7 @@ def run_query_for_miss(
 # -----------------------------
 # Flask App and Endpoints (OPTIMIZED)
 
-app = Flask(
-    __name__,
-    static_folder="public",
-    static_url_path=""
-)
+app = Flask(__name__, static_folder="public", static_url_path="")
 
 # Use the executor to parallelize external API/DB calls
 executor = ThreadPoolExecutor(max_workers=20)
@@ -1454,9 +1448,12 @@ def health():
             "cache_backend": backend,
         }
     )
+
+
 @app.route("/")
 def serve_frontend():
     return app.send_static_file("index.html")
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
