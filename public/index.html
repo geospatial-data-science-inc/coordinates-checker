@@ -86,7 +86,7 @@
 
             </select>
 
-            <label class="form-label mt-3">Upload CSV File</label>
+            <label class="form-label mt-3">Upload CSV File (20 max)</label>
             <input type="file" class="form-control" id="fileUpload" accept=".csv">
 
             <div class="form-text">CSV columns: ID, Name, x (longitude), y (latitude), Admin1, Admin2, Admin3</div>
@@ -168,11 +168,20 @@
     <!-- Main Content -->
     <div class="main-content" id="mainContent">
       <div class="main-header">
-        <h1><i class="fas fa-map-marked-alt me-2"></i>Health Facility GPS Validation Dashboard</h1>
+        <div>
+
+          <h1><i class="fas fa-map-marked-alt me-2"></i>Health Facility GPS Validation Dashboard</h1>
+          <div class="contact-info">
+            <span class="contact-label">Support:</span>
+            <a href="mailto:coordinate.checker@gmail.com" class="contact-email">
+              coordinate.checker@gmail.com
+            </a>
+          </div>
+        </div>
+
         <div class="d-flex">
-          <span class="badge bg-primary me-2">Real-time</span>
-          <span class="badge bg-success me-2">Live</span>
-          <span class="badge bg-success">version 1.0.2</span>
+          <span class="badge bg-primary me-2" id="healthBadges"></span>
+          <span class="badge bg-success">version 1.0.3</span>
 
         </div>
       </div>
@@ -284,7 +293,7 @@
   <script src="https://cdn.datatables.net/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://api.mapbox.com/mapbox.js/plugins/leaflet-fullscreen/v1.0.1/Leaflet.fullscreen.min.js"></script>
   <script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="script.js"></script>
 
 </body>
