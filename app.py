@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 
 import duckdb
 from concurrent.futures import ThreadPoolExecutor
@@ -28,6 +28,7 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 CACHE_BUFFER_LIMIT = int(os.getenv("CACHE_BUFFER_LIMIT", "50"))
+PREMIUM_KEY = os.getenv("PREMIUM_KEY")
 
 USE_UPSTASH = os.getenv("USE_UPSTASH", "true").lower() == "true"
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL")
@@ -1450,9 +1451,42 @@ def health():
     )
 
 
-@app.route("/")
-def serve_frontend():
-    return app.send_static_file("index.html")
+# -------------------------------
+# Normal frontend (existing)
+@app.route("/", defaults={"path": ""})
+@app.route("/<path:path>")
+def serve_frontend(path):
+    """
+    Serves normal frontend from 'public' folder.
+    - '/' -> index.html
+    - '/static/...', '/js/...', etc. -> served automatically
+    """
+    if path == "" or path.endswith(".html"):
+        return send_from_directory("public", "index.html")
+    return send_from_directory("public", path)
+
+
+# -------------------------------
+# Premium frontend
+
+
+# Serve the main premium page with key required
+@app.route(f"/{PREMIUM_KEY}/premium")
+def serve_premium_index():
+    """
+    Main premium page, requires secret key.
+    """
+    return send_from_directory("premium_public", "index.html")
+
+
+# Serve all static assets for premium without key
+@app.route("/premium/<path:path>")
+def serve_premium_assets(path):
+    """
+    Static assets (JS, CSS, images) for premium frontend.
+    Accessible without the key so links work.
+    """
+    return send_from_directory("premium_public", path)
 
 
 if __name__ == "__main__":

@@ -856,6 +856,11 @@ function determineFacilityCategory(f) {
 
 // --- Core validation with progress tracking ---
 async function validateCoordinates() {
+  // Scroll smoothly to the progress section
+  const progressSection = document.getElementById("progressSection");
+  if (progressSection) {
+    progressSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   startTime = Date.now();
   if (totalTimerInterval) clearInterval(totalTimerInterval);
   totalTimerInterval = setInterval(updateTotalElapsedTime, 1000);

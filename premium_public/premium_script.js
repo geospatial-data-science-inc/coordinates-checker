@@ -85,15 +85,66 @@ function formatTime(sec) {
   return `${m}m ${s}s`;
 }
 
+/* -------------------------------------------
+   HEALTH CHECK SCRIPT
+------------------------------------------- */
+
+async function runHealthCheck() {
+  try {
+    const resp = await fetch(`${API_CONFIG.health_check}`);
+    data = await resp.json();
+    message = data?.status;
+    if (message === "healthy") {
+      document.getElementById("healthBadges").textContent = "Server Online";
+    } else {
+      document.getElementById("healthBadges").textContent = "Server Offline";
+      document.getElementById("healthBadges").classList.remove("bg-primary");
+      document.getElementById("healthBadges").classList.add("bg-danger");
+    }
+  } catch (e) {
+    document.getElementById("healthBadges").textContent = "Server Offline";
+    document.getElementById("healthBadges").classList.remove("bg-primary");
+    document.getElementById("healthBadges").classList.add("bg-danger");
+  }
+}
+
+// Optionally, run health check on page load
+document.addEventListener("DOMContentLoaded", () => {
+  runHealthCheck();
+});
+
+// // Optional button to manually trigger health check
+// const healthBtn = document.getElementById("healthCheckBtn");
+// if (healthBtn) {
+//   healthBtn.addEventListener("click", runHealthCheck);
+// }
+
+// Sort country
+function sortCountrySelect(selectId) {
+  const select = document.getElementById(selectId);
+  if (!select) return;
+
+  // Preserve the placeholder (first option)
+  const placeholder = select.options[0];
+
+  // Convert options to array, excluding placeholder
+  const options = Array.from(select.options)
+    .slice(1)
+    .sort((a, b) => a.text.localeCompare(b.text));
+
+  // Clear and rebuild
+  select.innerHTML = "";
+  select.appendChild(placeholder);
+  options.forEach((opt) => select.appendChild(opt));
+}
+
 $(document).ready(function () {
+  // 1. Sort the countries first
+  sortCountrySelect("countrySelect");
+
   window.resultsTable = $("#resultsTable").DataTable({
     searchPanes: { cascadePanes: true, viewTotal: true },
     buttons: [
-      {
-        extend: "excelHtml5",
-        text: '<i class="fas fa-file-excel me-1"></i> Export to Excel',
-        className: "btn btn-success btn-sm",
-      },
       {
         extend: "csvHtml5",
         text: '<i class="fas fa-file-csv me-1"></i> Export CSV',
@@ -169,15 +220,206 @@ let markers = {};
 let countryData = null;
 
 const countryAlpha2Map = {
-  MW: "mw",
+  AF: "af",
+  AL: "al",
+  DZ: "dz",
+  AS: "as",
+  AD: "ad",
+  AO: "ao",
+  AI: "ai",
+  AQ: "aq",
+  AG: "ag",
+  AR: "ar",
+  AM: "am",
+  AW: "aw",
+  AU: "au",
+  AT: "at",
+  AZ: "az",
+  BS: "bs",
+  BH: "bh",
+  BD: "bd",
+  BB: "bb",
+  BY: "by",
+  BE: "be",
+  BZ: "bz",
+  BJ: "bj",
+  BM: "bm",
+  BT: "bt",
+  BO: "bo",
+  BA: "ba",
+  BW: "bw",
+  BR: "br",
+  BN: "bn",
+  BG: "bg",
+  BF: "bf",
+  BI: "bi",
+  KH: "kh",
+  CM: "cm",
+  CA: "ca",
+  CV: "cv",
+  KY: "ky",
+  CF: "cf",
+  TD: "td",
+  CL: "cl",
+  CN: "cn",
+  CO: "co",
+  KM: "km",
+  CD: "cd",
+  CG: "cg",
+  CR: "cr",
+  CI: "ci",
+  HR: "hr",
+  CU: "cu",
+  CY: "cy",
+  CZ: "cz",
+  DK: "dk",
+  DJ: "dj",
+  DM: "dm",
+  DO: "do",
+  EC: "ec",
+  EG: "eg",
+  SV: "sv",
+  GQ: "gq",
+  ER: "er",
+  EE: "ee",
+  SZ: "sz",
+  ET: "et",
+  FJ: "fj",
+  FI: "fi",
+  FR: "fr",
+  GA: "ga",
+  GM: "gm",
+  GE: "ge",
+  DE: "de",
+  GH: "gh",
+  GR: "gr",
+  GD: "gd",
+  GT: "gt",
+  GN: "gn",
+  GW: "gw",
+  GY: "gy",
+  HT: "ht",
+  HN: "hn",
+  HU: "hu",
+  IS: "is",
+  IN: "in",
+  ID: "id",
+  IR: "ir",
+  IQ: "iq",
+  IE: "ie",
+  IL: "il",
+  IT: "it",
+  JM: "jm",
+  JP: "jp",
+  JO: "jo",
+  KZ: "kz",
   KE: "ke",
+  KI: "ki",
+  KP: "kp",
+  KR: "kr",
+  KW: "kw",
+  KG: "kg",
+  LA: "la",
+  LV: "lv",
+  LB: "lb",
+  LS: "ls",
+  LR: "lr",
+  LY: "ly",
+  LI: "li",
+  LT: "lt",
+  LU: "lu",
+  MG: "mg",
+  MW: "mw",
+  MY: "my",
+  MV: "mv",
+  ML: "ml",
+  MT: "mt",
+  MH: "mh",
+  MR: "mr",
+  MU: "mu",
+  MX: "mx",
+  FM: "fm",
+  MD: "md",
+  MC: "mc",
+  MN: "mn",
+  ME: "me",
+  MA: "ma",
+  MZ: "mz",
+  MM: "mm",
+  NA: "na",
+  NR: "nr",
+  NP: "np",
+  NL: "nl",
+  NZ: "nz",
+  NI: "ni",
+  NE: "ne",
+  NG: "ng",
+  MK: "mk",
+  NO: "no",
+  OM: "om",
+  PK: "pk",
+  PW: "pw",
+  PA: "pa",
+  PG: "pg",
+  PY: "py",
+  PE: "pe",
+  PH: "ph",
+  PL: "pl",
+  PT: "pt",
+  QA: "qa",
+  RO: "ro",
+  RU: "ru",
+  RW: "rw",
+  KN: "kn",
+  LC: "lc",
+  VC: "vc",
+  WS: "ws",
+  SM: "sm",
+  ST: "st",
+  SA: "sa",
+  SN: "sn",
+  RS: "rs",
+  SC: "sc",
+  SL: "sl",
+  SG: "sg",
+  SK: "sk",
+  SI: "si",
+  SB: "sb",
+  SO: "so",
+  ZA: "za",
+  SS: "ss",
+  ES: "es",
+  LK: "lk",
+  SD: "sd",
+  SR: "sr",
+  SE: "se",
+  CH: "ch",
+  SY: "sy",
+  TW: "tw",
+  TJ: "tj",
   TZ: "tz",
+  TH: "th",
+  TL: "tl",
+  TG: "tg",
+  TO: "to",
+  TT: "tt",
+  TN: "tn",
+  TR: "tr",
+  TM: "tm",
   UG: "ug",
+  UA: "ua",
+  AE: "ae",
+  GB: "gb",
+  US: "us",
+  UY: "uy",
+  UZ: "uz",
+  VU: "vu",
+  VA: "va",
+  VE: "ve",
+  VN: "vn",
+  YE: "ye",
   ZM: "zm",
   ZW: "zw",
-  NG: "ng",
-  CD: "cd",
-  TD: "td",
 };
 
 const csvTemplateHeaders = [
@@ -197,11 +439,13 @@ const API_CONFIG = {
   road_distance: "/api/road_distance",
   building_distance: "/api/building_distance",
   water_check: "/api/water_check",
+  health_check: "/health",
 };
 
 document
   .getElementById("fileUpload")
   .addEventListener("change", handleFileUpload);
+
 document.getElementById("countrySelect").addEventListener("change", () => {
   const country = document.getElementById("countrySelect").value;
   if (country) loadCountryBoundary(country);
@@ -211,6 +455,8 @@ document
   .getElementById("validateBtn")
   .addEventListener("click", validateCoordinates);
 
+const MAX_FACILITIES = 1000;
+
 function handleFileUpload(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -219,17 +465,37 @@ function handleFileUpload(e) {
     header: true,
     skipEmptyLines: true,
     complete: function (results) {
-      uploadedData = results.data
-        .filter((r) => r.Name && r.x && r.y)
-        .map((r, idx) => ({
-          Id: r.Id ?? r.id ?? `${idx + 1}`, // ← THIS IS THE FIX
-          Name: r.Name,
-          x: r.x,
-          y: r.y,
-          Admin1: r.Admin1 || "",
-          Admin2: r.Admin2 || "",
-          Admin3: r.Admin3 || "",
-        }));
+      const filteredData = results.data.filter((r) => r.Name && r.x && r.y);
+
+      // 🚫 Enforce facility limit AFTER filtering
+      if (filteredData.length > MAX_FACILITIES) {
+        alert(
+          `Maximum allowed facilities: ${MAX_FACILITIES}\n` +
+            `Your file contains ${filteredData.length} valid facilities.\n\n` +
+            `Please reduce the file size and try again.`
+        );
+
+        // Reset file input
+        document.getElementById("fileUpload").value = "";
+
+        uploadedData = [];
+        updateValidateButton();
+        updateDataSummary();
+        updateStats();
+
+        return;
+      }
+
+      // ✅ Only map if within limit
+      uploadedData = filteredData.map((r, idx) => ({
+        Id: r.Id ?? r.id ?? `${idx + 1}`,
+        Name: r.Name,
+        x: r.x,
+        y: r.y,
+        Admin1: r.Admin1 || "",
+        Admin2: r.Admin2 || "",
+        Admin3: r.Admin3 || "",
+      }));
 
       updateValidateButton();
       updateDataSummary();
@@ -432,23 +698,31 @@ function zoomMapToResults(results) {
 //Csv template
 document
   .getElementById("downloadTemplateBtn")
-  .addEventListener("click", downloadCsvTemplate);
+  .addEventListener("click", downloadTemplateZip);
 
-function downloadCsvTemplate() {
-  const rows = [csvTemplateHeaders];
+async function downloadTemplateZip() {
+  // 1️⃣ Create CSV content
+  const csvContent = [csvTemplateHeaders]
+    .map((row) => row.join(","))
+    .join("\n");
+  const csvBlob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
 
-  const csvContent = rows.map((row) => row.join(",")).join("\n");
+  // 2️⃣ Fetch the ready PDF from assets
+  const pdfResp = await fetch("/assets/Health_Facility_Upload_Guide.pdf"); // adjust path if needed
+  const pdfBlob = await pdfResp.blob();
 
-  const blob = new Blob([csvContent], {
-    type: "text/csv;charset=utf-8;",
-  });
+  // 3️⃣ Create ZIP using JSZip
+  const zip = new JSZip();
+  zip.file("health_facility_upload_template.csv", csvBlob);
+  zip.file("Health_Facility_Upload_Guide.pdf", pdfBlob);
 
-  const url = URL.createObjectURL(blob);
+  // 4️⃣ Generate the ZIP and trigger download
+  const zipContent = await zip.generateAsync({ type: "blob" });
+  const url = URL.createObjectURL(zipContent);
 
   const link = document.createElement("a");
   link.href = url;
-  link.download = "health_facility_upload_template.csv";
-
+  link.download = "Health_Facility_Template.zip";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -582,6 +856,11 @@ function determineFacilityCategory(f) {
 
 // --- Core validation with progress tracking ---
 async function validateCoordinates() {
+  // Scroll smoothly to the progress section
+  const progressSection = document.getElementById("progressSection");
+  if (progressSection) {
+    progressSection.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   startTime = Date.now();
   if (totalTimerInterval) clearInterval(totalTimerInterval);
   totalTimerInterval = setInterval(updateTotalElapsedTime, 1000);
