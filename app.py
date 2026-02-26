@@ -232,7 +232,7 @@ WORLDPOP_YEAR = 2020
 WORLDPOP_TEMPLATE = "https://api.worldpop.org/v1/services/stats"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
 
-BUCKET = os.getenv("DUCKDB_BUCKET", "s3://overturemaps-us-west-2/release/2025-12-17.0")
+BUCKET = os.getenv("DUCKDB_BUCKET", "s3://overturemaps-us-west-2/release/2026-02-18.0")
 DUCKDB_FILE = os.getenv("DUCKDB_FILE", "/tmp/overture.duckdb")
 
 
