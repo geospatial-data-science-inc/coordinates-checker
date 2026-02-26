@@ -455,7 +455,7 @@ document
   .getElementById("validateBtn")
   .addEventListener("click", validateCoordinates);
 
-const MAX_FACILITIES = 1000;
+const MAX_FACILITIES = 3000;
 
 function handleFileUpload(e) {
   const file = e.target.files[0];
