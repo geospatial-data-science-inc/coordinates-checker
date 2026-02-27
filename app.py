@@ -671,9 +671,10 @@ def overture_water_check(lat: float, lon: float) -> dict:
     lat_r = round(lat, 4)
     lon_r = round(lon, 4)
 
-    path_pattern = (
-        "s3://overturemaps-us-west-2/" "release/2025-12-17.0/theme=base/type=water/*"
-    )
+    # path_pattern = (
+    #     "s3://overturemaps-us-west-2/" "release/2025-12-17.0/theme=base/type=water/*"
+    # )
+    path_pattern = f"{BUCKET}/theme=base/type=water/*"
 
     query = f"""
     SELECT
