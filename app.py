@@ -231,6 +231,8 @@ WORLDPOP_DATASET = "wpgppop"
 WORLDPOP_YEAR = 2020
 WORLDPOP_TEMPLATE = "https://api.worldpop.org/v1/services/stats"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+LOCATIONIQ_KEY = os.getenv("LOCATIONIQ_KEY")
+LOCATIONIQ_URL = os.getenv("LOCATIONIQ_URL")
 
 BUCKET = os.getenv("DUCKDB_BUCKET", "s3://overturemaps-us-west-2/release/2026-02-18.0")
 DUCKDB_FILE = os.getenv("DUCKDB_FILE", "/tmp/overture.duckdb")
@@ -498,7 +500,7 @@ ISO2_TO_ISO3 = {
 
 def validate_worldpop_url():
     test_url = (
-        f"{R2_BASE_URL}/{WORLDPOP_YEAR}/ZMB/" f"zmb_ppp_{WORLDPOP_YEAR}_UNadj_COG.tif"
+        f"{R2_BASE_URL}/{WORLDPOP_YEAR}/ZMB/zmb_ppp_{WORLDPOP_YEAR}_UNadj_COG.tif"
     )
     try:
         with rasterio.Env(
@@ -833,25 +835,96 @@ def get_worldpop_population_no_cache(lat: float, lon: float, iso3: str) -> dict:
 
 last_nominatim_call = 0
 NOMINATIM_DELAY = 0.5
+locationiq_lock = threading.Lock()
+last_locationiq_call = 0
+LOCATIONIQ_DELAY = 0.6
+
+
+def reverse_lookup(lat, lon):
+
+    # 1️⃣ Try LocationIQ first
+    try:
+        return locationiq_lookup(lat, lon)
+    except Exception as e:
+        print("[LocationIQ error]", e)
+
+    # 2️⃣ Fallback to Nominatim
+    try:
+        return nominatim_lookup_no_cache(lat, lon)
+    except Exception as e:
+        print("[Nominatim error]", e)
+
+    return {"error": "reverse lookup failed", "source": "failed"}
+
+
+def normalize_locationiq_response(data):
+    """
+    Convert LocationIQ response to Nominatim-compatible format
+    so the frontend does not need changes.
+    """
+
+    address = {
+        "country": data.get("country"),
+        "country_code": data.get("country_code"),
+        "state": data.get("state"),
+        "province": data.get("state"),
+        "region": data.get("state"),
+        "county": data.get("county"),
+        "city": data.get("city"),
+        "town": data.get("town"),
+        "village": data.get("village"),
+        "postcode": data.get("postcode"),
+        "road": data.get("road"),
+        "house_number": data.get("house_number"),
+        "suburb": data.get("suburb"),
+    }
+
+    return {
+        "place_id": data.get("place_id"),
+        "display_name": data.get("display_name"),
+        "lat": data.get("lat"),
+        "lon": data.get("lon"),
+        "address": address,
+        "source": "locationiq",
+    }
+
+
+def locationiq_lookup(lat, lon):
+
+    params = {"key": LOCATIONIQ_KEY, "lat": lat, "lon": lon, "format": "json"}
+
+    r = requests.get(LOCATIONIQ_URL, params=params, timeout=5)
+    r.raise_for_status()
+
+    raw = r.json()
+
+    return normalize_locationiq_response(raw)
 
 
 def nominatim_lookup_no_cache(lat, lon):
     # NOTE: Time delay is commented out to prevent blocking the executor pool
     params = {"format": "json", "lat": lat, "lon": lon, "addressdetails": 1}
-    try:
-        r = requests.get(
-            NOMINATIM_URL,
-            params=params,
-            headers={"User-Agent": "CoordinateChecker/1.0"},
-            timeout=10,
-        )
-        global last_nominatim_call
-        last_nominatim_call = time.time()
-        res = r.json()
-        res["source"] = "nominatim"
-        return res
-    except Exception as e:
-        return {"error": str(e), "source": "failed"}
+    headers = {"User-Agent": "CoordinateChecker/1.0"}
+    urls = [NOMINATIM_URL]
+    errors = []
+    for url in urls:
+        try:
+            r = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=10,
+            )
+            global last_nominatim_call
+            last_nominatim_call = time.time()
+            res = r.json()
+            if "error" not in res:
+                res["source"] = "nominatim"
+                return res
+            errors.append(res.get("error"))
+        except Exception as e:
+            errors.append(str(e))
+    return {"error": "; ".join(errors), "source": "failed"}
 
 
 # --- Single function to run all fallbacks/external calls (used by executor) ---
@@ -873,7 +946,7 @@ def run_query_for_miss(
         if is_worldpop:
             res = get_worldpop_population_no_cache(lat, lon, iso3)
         elif is_nominatim:
-            res = nominatim_lookup_no_cache(lat, lon)
+            res = reverse_lookup(lat, lon)
         elif is_water_check:
             res = overture_water_check(lat, lon)
         else:
@@ -1418,7 +1491,7 @@ def overture_match():
     return jsonify(
         {
             "valid": True,
-            "message": f"Closest entity: {row.get('name','unknown')}",
+            "message": f"Closest entity: {row.get('name', 'unknown')}",
             "distance": round(float(row["distance"]) * 111000, 2),
             "source": row.get("source", "unknown"),
         }
