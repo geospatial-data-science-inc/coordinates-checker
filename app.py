@@ -837,7 +837,7 @@ last_nominatim_call = 0
 NOMINATIM_DELAY = 0.5
 locationiq_lock = threading.Lock()
 last_locationiq_call = 0
-LOCATIONIQ_DELAY = 0.6
+LOCATIONIQ_DELAY = 0.5
 
 
 def reverse_lookup(lat, lon):
@@ -862,21 +862,22 @@ def normalize_locationiq_response(data):
     Convert LocationIQ response to Nominatim-compatible format
     so the frontend does not need changes.
     """
+    addr = data.get("address", {})
 
     address = {
-        "country": data.get("country"),
-        "country_code": data.get("country_code"),
-        "state": data.get("state"),
-        "province": data.get("state"),
-        "region": data.get("state"),
-        "county": data.get("county"),
-        "city": data.get("city"),
-        "town": data.get("town"),
-        "village": data.get("village"),
-        "postcode": data.get("postcode"),
-        "road": data.get("road"),
-        "house_number": data.get("house_number"),
-        "suburb": data.get("suburb"),
+        "country": addr.get("country"),
+        "country_code": addr.get("country_code"),
+        "state": addr.get("state"),
+        "province": addr.get("state"),
+        "region": addr.get("state"),
+        "county": addr.get("county"),
+        "city": addr.get("city"),
+        "town": addr.get("town"),
+        "village": addr.get("village"),
+        "postcode": addr.get("postcode"),
+        "road": addr.get("road"),
+        "house_number": addr.get("house_number"),
+        "suburb": addr.get("suburb"),
     }
 
     return {
@@ -890,15 +891,27 @@ def normalize_locationiq_response(data):
 
 
 def locationiq_lookup(lat, lon):
+    global last_locationiq_call
 
-    params = {"key": LOCATIONIQ_KEY, "lat": lat, "lon": lon, "format": "json"}
+    with locationiq_lock:
+        elapsed = time.time() - last_locationiq_call
+        if elapsed < LOCATIONIQ_DELAY:
+            time.sleep(LOCATIONIQ_DELAY - elapsed)
 
-    r = requests.get(LOCATIONIQ_URL, params=params, timeout=5)
-    r.raise_for_status()
+        last_locationiq_call = time.time()
 
-    raw = r.json()
+        params = {"key": LOCATIONIQ_KEY, "lat": lat, "lon": lon, "format": "json"}
+        r = requests.get(LOCATIONIQ_URL, params=params, timeout=5)
+        r.raise_for_status()
+        raw = r.json()
+        # print(f"{raw}")
+        # Explicit error check
+        if "error" in raw or not raw.get("place_id"):
+            raise ValueError(
+                f"LocationIQ lookup failed: {raw.get('error', 'unknown error')}"
+            )
 
-    return normalize_locationiq_response(raw)
+        return normalize_locationiq_response(raw)
 
 
 def nominatim_lookup_no_cache(lat, lon):

@@ -898,6 +898,7 @@ async function validateCoordinates() {
         );
         countryData = await countryResp.json();
         const expectedCountry = countryAlpha2Map[country];
+        console.log(countryData);
         f.countryBoundary = {
           valid: countryData.address?.country_code === expectedCountry,
           message: countryData.address?.country || "Unknown",
